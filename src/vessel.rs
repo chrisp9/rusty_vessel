@@ -25,6 +25,12 @@ impl Vessel {
         };
     }
 
+    pub fn read(&mut self) {
+
+
+
+    }
+
     pub fn write(
         &mut self,
         record: domain::Record)

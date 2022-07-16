@@ -5,20 +5,23 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 
 pub struct Buffer {
     data: Vec<String>,
-    count: i32
+    count: i32,
+    timestamp: u64
 }
 
 impl Buffer {
-    pub fn new(count: i32) -> Buffer {
+    pub fn new(count: i32, timestamp: u64) -> Buffer {
         return Buffer {
             data: vec![],
-            count
+            count,
+            timestamp
         }
     }
 
-    pub fn push(&mut self, s: String) {
+    pub fn push(&mut self, timestamp: u64, s: String) {
         self.data.push(s);
         self.count = self.count + 1;
+        self.timestamp = timestamp;
     }
 
     pub fn flush(&mut self, writer: &mut BufWriter<&File>) {
@@ -31,7 +34,7 @@ impl Buffer {
 }
 
 pub struct OpenChunk {
-    dir: File,
+    file: File,
     data: Buffer
 }
 
@@ -65,28 +68,36 @@ impl OpenChunk {
         }
 
         return recent_chunk.map(|(time, file)| {
+            let file_name = file.file_name().into_string().unwrap();
+
+            let mut timestamp = file_name
+                .parse::<u64>()
+                .unwrap();
+
             let file = Self::open_file(file.path().clone());
             let reader = BufReader::new(&file);
             let mut count = 0;
 
             for line in reader.lines() {
-                line.unwrap();
+                let s = line.unwrap();
+                let vec = s.split("|").collect::<Vec<&str>>();
+                timestamp = vec[0].parse::<u64>().unwrap();
                 count = count + 1;
             }
 
             return OpenChunk {
-                dir: file,
-                data: Buffer::new(count),
+                file,
+                data: Buffer::new(count, timestamp),
             };
         });
     }
 
     pub fn append(&mut self, timestamp: u64, data: &str) {
-        self.data.push(format!("{data}"));
+        self.data.push(timestamp, format!("{timestamp}|{data}"));
     }
 
     pub fn write(&mut self) {
-        let mut f = BufWriter::new(&self.dir);
+        let mut f = BufWriter::new(&self.file);
         self.data.flush(&mut f);
     }
 
@@ -96,8 +107,8 @@ impl OpenChunk {
         let file = Self::open_file(path.clone());
 
         return OpenChunk {
-            dir: file,
-            data: Buffer::new(0)
+            file: file,
+            data: Buffer::new(0, timestamp)
         }
     }
 
