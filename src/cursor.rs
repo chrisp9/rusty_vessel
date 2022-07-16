@@ -1,6 +1,6 @@
 use std::fs::OpenOptions;
 use std::path::PathBuf;
-use crate::OpenChunk;
+use crate::open_chunk::OpenChunk;
 
 pub struct Cursor {
     pub root: PathBuf,
