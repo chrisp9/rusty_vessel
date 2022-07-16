@@ -19,7 +19,10 @@ pub struct OpenChunk {
 
 impl OpenChunk {
     pub fn is_full(&self, capacity: i32) -> bool {
-        return self.size >= capacity;
+        let r = self.size >= capacity;
+        println!("{r}");
+
+        return r;
     }
 
     pub fn open_latest(path: PathBuf) -> Option<OpenChunk> {
@@ -45,8 +48,10 @@ impl OpenChunk {
         }
 
         return recent_chunk.map(|(time, file)| {
-            let stream = File::open(file.path()).unwrap();
-            let reader = BufReader::new(stream);
+            let file = OpenOptions::new().read(true).write(true).append(true).open(
+                file.path().clone()).unwrap();
+
+            let reader = BufReader::new(&file);
 
             let mut size = 0;
 
@@ -56,7 +61,7 @@ impl OpenChunk {
 
             return OpenChunk {
                 size,
-                dir: File::open(file.path()).unwrap()
+                dir: file
             };
         });
     }
@@ -71,11 +76,11 @@ impl OpenChunk {
         let path =  root.join(timestamp.to_string());
         File::create(path.clone()).unwrap();
 
-        let file = OpenOptions::new().write(true).append(true).open(
-            path.clone());
+        let file = OpenOptions::new().read(true).write(true).append(true).open(
+            path.clone()).unwrap();
 
         return OpenChunk {
-            dir: file.unwrap(),
+            dir: file,
             size: 0
         }
     }

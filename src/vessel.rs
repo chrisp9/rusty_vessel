@@ -14,8 +14,7 @@ pub struct Vessel {
 
 impl Vessel {
     pub fn new(root: &str, name: &str) -> Vessel {
-        let path = Path::new(root)
-            .join(name);
+        let path = Path::new(root).join(name);
 
         fs::create_dir_all(&path).unwrap();
 
@@ -37,8 +36,6 @@ impl Vessel {
                 Container::new(self.path.clone(), 1000))
         };
 
-        if !(container.is_full()) {
-            container.write(record.index, record.data);
-        }
+        container.write(record.index, record.data);
     }
 }

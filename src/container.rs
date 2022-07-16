@@ -27,7 +27,14 @@ impl Container {
             };
         });
 
-        this_chunk.write(index, &data);
+        if !this_chunk.is_full(self.chunk_capacity) {
+            this_chunk.write(index, &data);
+        } else {
+            let chunk = self.current_chunk.insert(
+                OpenChunk::create_new(self.root.clone(), index));
+
+            chunk.write(index, &data);
+        }
     }
 
     pub fn is_full(&self) -> bool {
