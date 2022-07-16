@@ -14,17 +14,20 @@ impl Container {
     }
 
     pub fn write(&mut self, index: u64, data: String) {
-        if self.current_chunk.is_none() {
-            let chunk = OpenChunk::open_latest(self.root.clone());
+        let this_chunk = self.current_chunk.get_or_insert_with(|| {
 
-            self.current_chunk = match chunk {
-                Some(c) => Some(c),
-                None => Some(OpenChunk::create_new(self.root.clone(),index))
+            // Try to open the latest chunk, if it exists.
+            let latest_chunk = OpenChunk::open_latest(self.root.clone());
+
+            return match latest_chunk {
+                Some(c) => c,
+
+                // If there is no latest chunk, create a new genesis chunk
+                None => OpenChunk::create_new(self.root.clone(),index)
             };
-        }
+        });
 
-        let mut a = self.current_chunk.as_mut().unwrap().write(index, &data);
-
+        this_chunk.write(index, &data);
     }
 
     pub fn is_full(&self) -> bool {

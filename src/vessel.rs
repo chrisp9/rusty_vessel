@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use crate::container::Container;
@@ -30,13 +31,10 @@ impl Vessel {
     {
         let key = record.key;
 
-        let container = match self.files.get_mut(key.as_str()) {
-            Some(v) => v,
-            None => {
-                let container = Container::new(self.path.clone(), 1000);
-                self.files.insert(key.clone(), container);
-                self.files.get_mut(key.as_str()).unwrap()
-            }
+        let container = match self.files.entry(key) {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(v) => v.insert(
+                Container::new(self.path.clone(), 1000))
         };
 
         if !(container.is_full()) {
