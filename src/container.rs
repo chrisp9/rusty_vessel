@@ -4,12 +4,13 @@ use crate::OpenChunk;
 
 pub struct Container {
     pub root: PathBuf,
-    current_chunk: Option<OpenChunk>
+    current_chunk: Option<OpenChunk>,
+    chunk_capacity: i32
 }
 
 impl Container {
-    pub fn new(path: PathBuf) -> Container {
-        return Container {root: path, current_chunk: None};
+    pub fn new(path: PathBuf, capacity: i32) -> Container {
+        return Container {root: path, current_chunk: None, chunk_capacity: capacity};
     }
 
     pub fn write(&mut self, index: u64, data: String) {
@@ -22,6 +23,14 @@ impl Container {
             };
         }
 
-        self.current_chunk.as_ref().unwrap().write(index, &data);
+        let mut a = self.current_chunk.as_mut().unwrap().write(index, &data);
+
+    }
+
+    pub fn is_full(&self) -> bool {
+        return match &self.current_chunk {
+            Some(chunk) => chunk.is_full(self.chunk_capacity),
+            None => false
+        }
     }
 }

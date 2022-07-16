@@ -1,4 +1,3 @@
-use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use crate::container::Container;
@@ -34,12 +33,14 @@ impl Vessel {
         let container = match self.files.get_mut(key.as_str()) {
             Some(v) => v,
             None => {
-                let container = Container::new(self.path.clone());
+                let container = Container::new(self.path.clone(), 1000);
                 self.files.insert(key.clone(), container);
                 self.files.get_mut(key.as_str()).unwrap()
             }
         };
 
-        container.write(record.index, record.data);
+        if !(container.is_full()) {
+            container.write(record.index, record.data);
+        }
     }
 }

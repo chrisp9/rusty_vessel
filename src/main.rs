@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::fs::{DirEntry, File, OpenOptions, read_dir};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use crate::domain::Record;
 use crate::vessel::Vessel;
@@ -18,6 +18,10 @@ pub struct OpenChunk {
 }
 
 impl OpenChunk {
+    pub fn is_full(&self, capacity: i32) -> bool {
+        return self.size >= capacity;
+    }
+
     pub fn open_latest(path: PathBuf) -> Option<OpenChunk> {
         let paths = fs::read_dir(path).unwrap();
 
@@ -25,7 +29,11 @@ impl OpenChunk {
 
         for path in paths {
             let file = path.unwrap();
-            let timestamp:i64 = String::from(file.file_name().to_str().unwrap()).parse::<i64>().unwrap();
+            let file_name = file.file_name().into_string().unwrap();
+
+           let timestamp = file_name
+               .parse::<i64>()
+               .unwrap();
 
             recent_chunk = match &recent_chunk {
 
@@ -53,8 +61,10 @@ impl OpenChunk {
         });
     }
 
-    pub fn write(&self, timestamp: u64, data: &str) {
-
+    pub fn write(&mut self, timestamp: u64, data: &str) {
+        self.size = self.size + 1;
+        let mut f = BufWriter::new(&self.dir);
+        let _ = writeln!(f, "{data}");
     }
 
     pub fn create_new(root: PathBuf, timestamp: u64) -> OpenChunk {
@@ -83,8 +93,4 @@ fn main() {
 
         vessel.write(record);
     }
-
-
-
-
 }
