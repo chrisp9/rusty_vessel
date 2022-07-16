@@ -2,23 +2,15 @@ use std::fs::OpenOptions;
 use std::path::PathBuf;
 use crate::OpenChunk;
 
-pub struct Container {
+pub struct Cursor {
     pub root: PathBuf,
     current_chunk: Option<OpenChunk>,
     chunk_capacity: i32
 }
 
-impl Container {
-    pub fn new(path: PathBuf, capacity: i32) -> Container {
-        return Container {root: path, current_chunk: None, chunk_capacity: capacity};
-    }
-
-    pub fn get_current_chunk(&mut self, chunk: &mut OpenChunk, index: u64) -> &mut OpenChunk {
-        match chunk.is_full(self.chunk_capacity) {
-            true => chunk,
-            false => self.current_chunk.insert(
-                OpenChunk::create_new(self.root.clone, index))
-        }
+impl Cursor {
+    pub fn new(path: PathBuf, capacity: i32) -> Cursor {
+        return Cursor {root: path, current_chunk: None, chunk_capacity: capacity};
     }
 
     pub fn write(&mut self, index: u64, data: String) {
@@ -34,11 +26,15 @@ impl Container {
             };
         });
 
-        // If the current chunk is not full, write to it,
-        // otherwise create a new chunk and write to the
-        // new chunk.
-        self.get_current_chunk(this_chunk, index)
-            .write(index, &data);
+        // If the current chunk is not full, write to it, otherwise create a new chunk
+        // and write to the new chunk.
+        let chunk = match this_chunk.is_full(self.chunk_capacity) {
+            true => this_chunk,
+            false => self.current_chunk.insert(
+                OpenChunk::create_new(self.root.clone(), index))
+        };
+
+        chunk.write(index, &data);
     }
 
     pub fn is_full(&self) -> bool {
