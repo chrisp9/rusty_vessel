@@ -39,9 +39,7 @@ impl OpenChunk {
 
         return recent_chunk.map(|(time, file)| {
             let file = Self::open_file(file.path().clone());
-
             let reader = BufReader::new(&file);
-
             let mut size = 0;
 
             for _ in reader.lines() {
@@ -63,9 +61,7 @@ impl OpenChunk {
 
     pub fn create_new(root: PathBuf, timestamp: u64) -> OpenChunk {
         let path =  root.join(timestamp.to_string());
-
         let _ = File::create(path.clone()).unwrap();
-
         let file = Self::open_file(path.clone());
 
         return OpenChunk {
