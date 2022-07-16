@@ -1,6 +1,6 @@
 use std::fs::OpenOptions;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::task;
 use crate::open_chunk::OpenChunk;
@@ -21,18 +21,17 @@ impl Cursor {
             current_chunk: chunk.clone(),
             chunk_capacity: capacity};
 
-        tokio::spawn(
-        async move {
+        fn flush(mut guard: MutexGuard<Option<OpenChunk>>) {
+            match &mut *guard {
+                Some(c) => c.write(),
+                None => ()
+            };
+        }
+
+        // Periodically flush the buffer to disk if necessary.
+        tokio::spawn(async move {
             loop {
-                {
-                    let mut guard = chunk.lock().unwrap();
-
-                    match &mut *guard {
-                        Some(c) => (),
-                        None => ()
-                    };
-                }
-
+                flush(chunk.lock().unwrap());
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });

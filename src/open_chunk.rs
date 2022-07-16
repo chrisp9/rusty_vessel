@@ -3,14 +3,41 @@ use std::fs::{DirEntry, File, OpenOptions};
 use std::path::PathBuf;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
+pub struct Buffer {
+    data: Vec<String>,
+    count: i32
+}
+
+impl Buffer {
+    pub fn new(count: i32) -> Buffer {
+        return Buffer {
+            data: vec![],
+            count
+        }
+    }
+
+    pub fn push(&mut self, s: String) {
+        self.data.push(s);
+        self.count = self.count + 1;
+    }
+
+    pub fn flush(&mut self, writer: &mut BufWriter<&File>) {
+        for item in &self.data {
+            writeln!(writer, "{item}");
+        }
+
+        self.data.clear();
+    }
+}
+
 pub struct OpenChunk {
     dir: File,
-    data: Vec<String>
+    data: Buffer
 }
 
 impl OpenChunk {
     pub fn is_full(&self, capacity: i32) -> bool {
-        let r = self.data.len() >= capacity as usize;
+        let r = self.data.count >= capacity as i32;
         println!("{r}");
 
         return r;
@@ -40,15 +67,16 @@ impl OpenChunk {
         return recent_chunk.map(|(time, file)| {
             let file = Self::open_file(file.path().clone());
             let reader = BufReader::new(&file);
-            let mut data : Vec<String> = Vec::new();
+            let mut count = 0;
 
             for line in reader.lines() {
-                data.push(line.unwrap());
+                line.unwrap();
+                count = count + 1;
             }
 
             return OpenChunk {
                 dir: file,
-                data
+                data: Buffer::new(count),
             };
         });
     }
@@ -59,9 +87,7 @@ impl OpenChunk {
 
     pub fn write(&mut self) {
         let mut f = BufWriter::new(&self.dir);
-        for item in &self.data {
-            writeln!(f, "{item}");
-        }
+        self.data.flush(&mut f);
     }
 
     pub fn create_new(root: PathBuf, timestamp: u64) -> OpenChunk {
@@ -71,7 +97,7 @@ impl OpenChunk {
 
         return OpenChunk {
             dir: file,
-            data: Vec::new()
+            data: Buffer::new(0)
         }
     }
 

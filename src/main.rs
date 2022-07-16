@@ -3,6 +3,8 @@ use std::fs;
 use std::fs::{DirEntry, File, OpenOptions, read, read_dir};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::time;
 use crate::domain::Record;
 use crate::vessel::Vessel;
 
@@ -42,7 +44,7 @@ async fn main() {
     let root = "/home/chris/rusty_vessel";
     let mut vessel = Vessel::new(root, "Temperature");
 
-    for i in 0..1000000 {
+    for i in 0..10000 {
         let reading = TemperatureReading{ value: 9.0, altitude: 99.0 };
 
         let record = Record {
@@ -52,5 +54,6 @@ async fn main() {
         };
 
         vessel.write(record);
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
