@@ -26,7 +26,7 @@ impl OpenChunk {
     }
 
     pub fn open_latest(path: PathBuf) -> Option<OpenChunk> {
-        let paths = fs::read_dir(path).unwrap();
+        let paths = fs::read_dir(&path).unwrap();
 
         let mut recent_chunk: Option<(i64, DirEntry)> = None;
 
@@ -39,7 +39,6 @@ impl OpenChunk {
                .unwrap();
 
             recent_chunk = match &recent_chunk {
-
                 Some ((time, f)) =>
                     if timestamp > *time { Some((timestamp, file)) }
                     else { recent_chunk }
@@ -48,8 +47,7 @@ impl OpenChunk {
         }
 
         return recent_chunk.map(|(time, file)| {
-            let file = OpenOptions::new().read(true).write(true).append(true).open(
-                file.path().clone()).unwrap();
+            let file = Self::open_file(file.path().clone());
 
             let reader = BufReader::new(&file);
 
@@ -74,15 +72,24 @@ impl OpenChunk {
 
     pub fn create_new(root: PathBuf, timestamp: u64) -> OpenChunk {
         let path =  root.join(timestamp.to_string());
-        File::create(path.clone()).unwrap();
 
-        let file = OpenOptions::new().read(true).write(true).append(true).open(
-            path.clone()).unwrap();
+        let _ = File::create(path.clone()).unwrap();
+
+        let file = Self::open_file(path.clone());
 
         return OpenChunk {
             dir: file,
             size: 0
         }
+    }
+
+    fn open_file(path: PathBuf) -> File {
+        return OpenOptions::new()
+            .read(true)
+            .write(true)
+            .append(true)
+            .open(path.clone())
+            .unwrap();
     }
 }
 
