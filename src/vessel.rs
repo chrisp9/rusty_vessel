@@ -3,9 +3,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use crate::cursor::Cursor;
 use std::fs;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
-use crate::domain;
+use crate::{domain};
+
+pub unsafe fn to_u8_slice<T: Sized>(p: &T) -> &[u8] {
+    return ::std::slice::from_raw_parts(
+        (p as *const T) as *const u8,
+        ::std::mem::size_of::<T>(),
+    );
+}
+
+//pub unsafe fn from_u8_slice<T: Sized>(v: &[u8]) -> T {
+   // return std::mem::transmute(*v);
+//}
 
 pub struct Vessel {
     pub path: PathBuf,
@@ -21,7 +33,7 @@ impl Vessel {
         return Vessel {
             path,
             files: HashMap::new()
-        }
+        };
     }
 
     pub fn write(

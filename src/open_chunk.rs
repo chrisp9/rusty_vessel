@@ -5,12 +5,12 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 
 pub struct OpenChunk {
     dir: File,
-    size: i32
+    data: Vec<String>
 }
 
 impl OpenChunk {
     pub fn is_full(&self, capacity: i32) -> bool {
-        let r = self.size >= capacity;
+        let r = self.data.len() >= capacity as usize;
         println!("{r}");
 
         return r;
@@ -40,23 +40,28 @@ impl OpenChunk {
         return recent_chunk.map(|(time, file)| {
             let file = Self::open_file(file.path().clone());
             let reader = BufReader::new(&file);
-            let mut size = 0;
+            let mut data : Vec<String> = Vec::new();
 
-            for _ in reader.lines() {
-                size += 1;
+            for line in reader.lines() {
+                data.push(line.unwrap());
             }
 
             return OpenChunk {
-                size,
-                dir: file
+                dir: file,
+                data
             };
         });
     }
 
-    pub fn write(&mut self, timestamp: u64, data: &str) {
-        self.size = self.size + 1;
+    pub fn append(&mut self, timestamp: u64, data: &str) {
+        self.data.push(format!("{data}"));
+    }
+
+    pub fn write(&mut self) {
         let mut f = BufWriter::new(&self.dir);
-        let _ = writeln!(f, "{data}");
+        for item in &self.data {
+            writeln!(f, "{item}");
+        }
     }
 
     pub fn create_new(root: PathBuf, timestamp: u64) -> OpenChunk {
@@ -66,7 +71,7 @@ impl OpenChunk {
 
         return OpenChunk {
             dir: file,
-            size: 0
+            data: Vec::new()
         }
     }
 
