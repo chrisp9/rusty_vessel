@@ -3,9 +3,10 @@ use std::fs;
 use std::fs::{DirEntry, File, OpenOptions, read, read_dir};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use chrono::Duration;
 use tokio::time;
+use crate::storage::domain::Record;
 use crate::storage::vessel2::Vessel2;
-use crate::vessel::Vessel;
 
 mod cursor;
 mod vessel;
@@ -46,18 +47,18 @@ async fn main() {
     let mut vessel = Vessel2::new(
         root,
         "Temperature",
-        chrono::Duration::from_secs(60));
+        Duration::seconds(60));
 
     for i in 0..10000 {
         let reading = TemperatureReading{ value: 9.0, altitude: 99.0 };
 
-        let record = Record {
-            key: "London".to_string(),
-            index: i,
-            data: reading.to_string()
-        };
+        // let record = Record {
+        //     key: "London".to_string(),
+        //     index: i,
+        //     data: reading.to_string()
+        // };
 
-        vessel.write(record);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        //vessel.write(record);
+        //tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
