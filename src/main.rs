@@ -3,9 +3,8 @@ use std::fs;
 use std::fs::{DirEntry, File, OpenOptions, read, read_dir};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::time;
-use crate::domain::Record;
+use crate::storage::vessel2::Vessel2;
 use crate::vessel::Vessel;
 
 mod cursor;
@@ -13,6 +12,7 @@ mod vessel;
 mod domain;
 mod open_chunk;
 mod threading;
+mod storage;
 
 static CHUNK_SIZE:i32 = 1000;
 
@@ -42,7 +42,11 @@ impl TemperatureReading {
 #[tokio::main]
 async fn main() {
     let root = "/home/chris/rusty_vessel";
-    let mut vessel = Vessel::new(root, "Temperature");
+
+    let mut vessel = Vessel2::new(
+        root,
+        "Temperature",
+        chrono::Duration::from_secs(60));
 
     for i in 0..10000 {
         let reading = TemperatureReading{ value: 9.0, altitude: 99.0 };

@@ -6,7 +6,7 @@ use std::fs;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
-use crate::{domain};
+use crate::{domain, storage};
 
 pub struct Vessel {
     pub path: PathBuf,
@@ -33,7 +33,7 @@ impl Vessel {
         //container.write(0, "");
     }
 
-    pub fn write(&mut self, record: domain::Record) {
+    pub fn write(&mut self, record: storage::domain::Record) {
         let container = Self::get_cursor(
             self.files.entry(record.key),
             self.path.clone());

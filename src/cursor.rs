@@ -41,7 +41,7 @@ impl Cursor {
     }
 
     pub fn read(&mut self, index: u64) {
-
+        //self.write(index, "");
     }
 
     pub fn write(&mut self, index: u64, data: String) {
@@ -55,7 +55,9 @@ impl Cursor {
                 guarded_chunk.get_mut().write();
 
                 guarded_chunk.replace(
-                    OpenChunk::create_new(self.path.clone(), index));
+                    OpenChunk::create_new(
+                        self.path.clone(),
+                        index));
 
                 guarded_chunk
             }
