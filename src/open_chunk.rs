@@ -2,6 +2,7 @@ use std::fs;
 use std::fs::{DirEntry, File, OpenOptions};
 use std::path::PathBuf;
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use futures::TryFutureExt;
 
 pub struct Buffer {
     data: Vec<String>,
@@ -46,7 +47,7 @@ impl OpenChunk {
         return r;
     }
 
-    pub fn open_latest(path: PathBuf) -> Option<OpenChunk> {
+    pub fn open_latest(path: PathBuf) -> OpenChunk {
         let paths = fs::read_dir(&path).unwrap();
 
         let mut recent_chunk: Option<(i64, DirEntry)> = None;
@@ -89,7 +90,7 @@ impl OpenChunk {
                 file,
                 data: Buffer::new(count, timestamp),
             };
-        });
+        }).unwrap_or_else(|| OpenChunk::create_new(path, 0));
     }
 
     pub fn append(&mut self, timestamp: u64, data: &str) {

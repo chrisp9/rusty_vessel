@@ -25,24 +25,27 @@ impl Vessel {
         };
     }
 
-    pub fn read(&mut self) {
+    pub fn read(&mut self, key: String) {
+        let container = Self::get_cursor(
+            self.files.entry(key),
+            self.path.clone());
 
-
-
+        //container.write(0, "");
     }
 
-    pub fn write(
-        &mut self,
-        record: domain::Record)
-    {
-        let key = record.key;
-
-        let container = match self.files.entry(key) {
-            Entry::Occupied(o) => o.into_mut(),
-            Entry::Vacant(v) => v.insert(
-                Cursor::new(self.path.clone(), 1000))
-        };
+    pub fn write(&mut self, record: domain::Record) {
+        let container = Self::get_cursor(
+            self.files.entry(record.key),
+            self.path.clone());
 
         container.write(record.index, record.data);
+    }
+
+    fn get_cursor(cursor: Entry<String, Cursor>, path: PathBuf)  -> &mut Cursor {
+        return match cursor {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(v) => v.insert(
+                Cursor::new(path, 1000))
+        };
     }
 }
