@@ -9,8 +9,8 @@ use crate::storage::domain::Bucket;
 use crate::storage::file_system::FileSystem;
 
 pub struct FileHandle {
-    path: PathBuf,
-    bucket: Bucket
+    pub path: PathBuf,
+    pub bucket: Bucket
 }
 
 impl FileHandle {

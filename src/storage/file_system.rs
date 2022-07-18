@@ -11,30 +11,13 @@ use crate::storage::domain::{Bucket, BucketIssuer, DataPage, UnixTime};
 use crate::storage::guarded_file::FileHandle;
 
 pub struct FileSystem {
-    bucket_issuer: BucketIssuer,
     path: PathBuf,
     files: HashMap<Bucket, Arc<RwLock<FileHandle>>>,
-    current_page: Arc<RwLock<DataPage>>
 }
 
 impl FileSystem {
-    fn ensure_genesis_page(path: PathBuf) -> Arc<RwLock<DataPage>> {
-        fs::create_dir_all(&path).unwrap();
-        let path = Path::new(&path).join("0");
-        let bucket = Bucket::new(0);
-
-        let _ = File::create(path.clone()).unwrap();
-        let handle = FileHandle::new(path.clone(), bucket);
-
-        let guard = Arc::new(RwLock::new(handle));
-
-        let page = DataPage::open_page(bucket, guard);
-        return Arc::new(RwLock::new(page));
-    }
-
     pub fn new(path: PathBuf, bucket_issuer: BucketIssuer) -> FileSystem {
-        let mut current_page = Self::ensure_genesis_page(path.clone());
-
+        fs::create_dir_all(path.clone());
         // Read the file system to build up an in-memory index of the
         // current file system. It doesn't matter that this is slow,
         // because this only happens on initialization.
@@ -51,23 +34,46 @@ impl FileSystem {
         for (date, entry) in paths {
             let bucket = bucket_issuer.get_bucket_for(date);
             let node = FileHandle::new(entry.path(), bucket);
-
             let arc = Arc::new(RwLock::new(node));
 
             files.insert(bucket, arc.clone());
-            {
-                let mut w = current_page.write().unwrap();
-                if bucket > w.bucket {
-                    *w = DataPage::open_page(bucket, arc.clone());
-                }
-            }
         }
 
         return FileSystem {
-            bucket_issuer,
             path,
-            files,
-            current_page
+            files
         };
+    }
+
+    pub fn create_page(&mut self, bucket: Bucket) -> DataPage {
+        let file = self.files.get(&bucket);
+
+        if let Some(v) = file {
+            return DataPage::open_page(bucket, v.clone());
+        }
+
+        let file_handle = FileHandle::new(self.path.clone().join(bucket.value.to_string()), bucket);
+        File::create(&file_handle.path).unwrap();
+
+        let arc = Arc::new(RwLock::new(file_handle));
+        self.files.insert(bucket, arc.clone());
+
+        return DataPage::open_page(bucket, arc)
+    }
+
+    pub fn update_page(&mut self, mut page: DataPage, bucket: Bucket) -> DataPage {
+        let file = self.files.get(&bucket);
+
+        if let Some(v) = file {
+            return page.update(bucket, v.clone());
+        }
+
+        let file_handle = FileHandle::new(self.path.clone().join(bucket.value.to_string()), bucket);
+        File::create(&file_handle.path).unwrap();
+
+        let arc = Arc::new(RwLock::new(file_handle));
+        self.files.insert(bucket, arc.clone());
+
+        return page.update(bucket, arc)
     }
 }
