@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::current;
 use chrono::{DateTime, Utc};
+use crate::Blob;
 use crate::storage::bucket_issuer::{BucketIssuer, UnixTime};
 use crate::storage::domain::bucket::Bucket;
 use crate::storage::domain::data_page::DataPage;
@@ -59,6 +60,17 @@ impl FileSystem {
         return (file_system, page);
     }
 
+    pub fn read(&self, bucket: Bucket) -> Vec<Blob> {
+        let file_handle = self.files.get(&bucket);
+
+        if let Some(v) = file_handle {
+            let page = DataPage::open_page(bucket.clone(),  v.clone());
+            return page.read();
+        }
+
+        return vec![];
+    }
+
     pub fn get_last_time(&self) -> UnixTime {
         let last = self.files.last_key_value();
 
@@ -67,6 +79,10 @@ impl FileSystem {
                 let page = DataPage::open_page(bucket.clone(), file.clone());
 
                 let records = page.read();
+                if records.len() == 0 {
+                    return 0;
+                }
+
                 let last = records[records.len()-1];
 
                 return last.timestamp;

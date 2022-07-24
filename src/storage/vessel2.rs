@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::{ArcRead, threading};
 use crate::storage::bucket_issuer::{BucketIssuer, UnixTime};
 use crate::storage::domain::blob::Blob;
+use crate::storage::domain::bucket::Bucket;
 use crate::storage::domain::data_page::DataPage;
 use crate::storage::file_system::FileSystem;
 use crate::threading::ArcRw;
@@ -52,9 +53,9 @@ impl Vessel {
         tokio::task::spawn(async move {
             loop {
                 {
-                    let vessel = flush_vessel.write();
+                    let vessel = flush_vessel.write_lock();
                     let mut page =
-                        vessel.current_page.write();
+                        vessel.current_page.write_lock();
 
                     if page.is_some() {
                         page.as_mut().unwrap().flush();
@@ -73,12 +74,12 @@ impl Vessel {
             .bucket_issuer
             .get_bucket_for(record.timestamp);
 
-        let mut this_page= self.current_page.write();
+        let mut this_page= self.current_page.write_lock();
 
         match this_page.as_mut() {
 
             None => {
-                let mut fs = self.file_system.write();
+                let mut fs = self.file_system.write_lock();
 
                 let mut that_page = fs.create_page(this_bucket);
                 that_page.write(record);
@@ -98,7 +99,7 @@ impl Vessel {
                              this_bucket.value.to_string(),
                              chunk.bucket.value.to_string());
 
-                    let mut fs = self.file_system.write();
+                    let mut fs = self.file_system.write_lock();
 
                     let that_page = fs.update_page(chunk, this_bucket);
                     this_page.replace(that_page);
@@ -108,15 +109,66 @@ impl Vessel {
     }
 
     pub fn get_last_time(&self) -> UnixTime{
-        let mut lock = self.file_system.read();
+        let mut lock = self.file_system.read_lock();
         return lock.get_last_time().clone();
     }
 
-    pub fn read(&mut self, key: String) {
-        // let container = Self::get_cursor(
-        //    self.files.entry(key),
-        //    self.path.clone());
+    pub fn read_from(&self, from: UnixTime) -> VesselIterator {
+        return VesselIterator::new(
+            self.file_system.clone(),
+            self.bucket_issuer.clone(),
+        from);
+    }
+}
 
-        //container.write(0, "");
+pub struct VesselIterator {
+    pub fs: ArcRw<FileSystem>,
+    pub bucket_issuer: BucketIssuer,
+    pub start: Option<UnixTime>,
+    pub bucket: Bucket
+}
+
+impl VesselIterator {
+    pub fn new(
+        fs: ArcRw<FileSystem>,
+        bucket_issuer: BucketIssuer,
+        start: UnixTime) -> VesselIterator
+    {
+        return VesselIterator {
+            fs,
+            bucket_issuer,
+            start: Some(start),
+            bucket: bucket_issuer.get_bucket_for(start)
+        };
+    }
+}
+
+impl Iterator for VesselIterator{
+    type Item = Vec::<Blob>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let lock = self.fs.read_lock();
+        let mut data = lock.read(self.bucket);
+
+        if data.len() == 0 {
+            return None;
+        }
+
+        // As we read an entire page per call, for the first call
+        // we may need to truncate values prior to the start time.
+        if let Some(v) = self.start {
+            data = data
+                .into_iter()
+                .filter(|blob| blob.timestamp > v)
+                .into_iter()
+                .collect::<Vec::<Blob>>();
+
+            self.start = None;
+        }
+
+        let bucket = self.bucket_issuer.next(self.bucket);
+        self.bucket = bucket;
+
+        return Some(data);
     }
 }

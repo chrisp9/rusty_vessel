@@ -14,7 +14,7 @@ impl <T> ArcRead<T> {
         };
     }
 
-    pub fn read(&self) -> RwLockReadGuard<T> {
+    pub fn read_lock(&self) -> RwLockReadGuard<T> {
         let lock = self.item.read().unwrap();
         return lock;
     }
@@ -39,12 +39,12 @@ impl<T> ArcRw<T> {
         };
     }
 
-    pub fn read(&self) -> RwLockReadGuard<T> {
+    pub fn read_lock(&self) -> RwLockReadGuard<T> {
         let lock = self.item.read().unwrap();
         return lock;
     }
 
-    pub fn write(&self) -> RwLockWriteGuard<T> {
+    pub fn write_lock(&self) -> RwLockWriteGuard<T> {
         let mut lock = self.item.write().unwrap();
         return lock;
     }

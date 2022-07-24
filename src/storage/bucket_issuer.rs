@@ -14,7 +14,7 @@ use crate::storage::domain;
 use crate::storage::domain::bucket::Bucket;
 pub type UnixTime = i64;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct BucketIssuer {
     bucket_width: i64
 }
@@ -36,7 +36,7 @@ impl BucketIssuer {
         };
     }
 
-    pub fn next(&self, bucket: &Bucket) -> Bucket {
+    pub fn next(&self, bucket: Bucket) -> Bucket {
         return Bucket {
             value: bucket.value + self.bucket_width};
     }
