@@ -37,7 +37,6 @@ impl Vessel {
             path.clone(),
             bucket_issuer.clone());
 
-        let last_time = file_system.get_last_time();
         let data_page = ArcRw::new(page);
 
         let vessel =  Vessel {
@@ -54,7 +53,8 @@ impl Vessel {
             loop {
                 {
                     let vessel = flush_vessel.write();
-                    let mut page = vessel.current_page.write();
+                    let mut page =
+                        vessel.current_page.write();
 
                     if page.is_some() {
                         page.as_mut().unwrap().flush();
@@ -94,7 +94,9 @@ impl Vessel {
                     chunk.write(record.clone());
                     this_page.replace(chunk);
                 } else {
-                    println!("{} {}", this_bucket.value.to_string(), chunk.bucket.value.to_string());
+                    println!("{} {}",
+                             this_bucket.value.to_string(),
+                             chunk.bucket.value.to_string());
 
                     let mut fs = self.file_system.write();
 

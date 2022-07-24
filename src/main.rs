@@ -14,7 +14,9 @@ use crate::storage::vessel2::Vessel;
 use bincode::{Encode,Decode};
 use crate::storage::bucket_issuer::UnixTime;
 use crate::storage::domain::blob::Blob;
-use crate::streaming::persistent_stream::{PersistentStream, Stream, StreamMsg};
+use crate::streaming::domain::StreamMsg;
+use crate::streaming::persistent_stream::{PersistentStream};
+use crate::streaming::domain::{Stream};
 use crate::threading::ArcRead;
 
 mod threading;
@@ -32,13 +34,7 @@ fn new_stream(root: &str, name: &str, stride: chrono::Duration) -> PersistentStr
     let mut vessel = Vessel::new(
         root, name, stride);
 
-    let last_time: UnixTime;
-    {
-        let lock = vessel.read();
-        last_time = lock.get_last_time();
-    }
-
-    let stream = PersistentStream::new(vessel, last_time);
+    let stream = PersistentStream::new(vessel);
     return stream;
 }
 
