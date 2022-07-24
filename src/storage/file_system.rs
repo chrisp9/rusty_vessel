@@ -1,27 +1,30 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Error;
 use std::fs;
 use std::fs::{DirEntry, File};
+use std::marker::PhantomData;
+use std::ops::Index;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::current;
 use chrono::{DateTime, Utc};
-use crate::storage::domain;
-use crate::storage::domain::{Bucket, BucketIssuer, DataPage, UnixTime};
-use crate::storage::guarded_file::FileHandle;
+use crate::storage::bucket_issuer::{BucketIssuer, UnixTime};
+use crate::storage::domain::bucket::Bucket;
+use crate::storage::domain::data_page::DataPage;
+use crate::storage::file_handle::FileHandle;
 
 pub struct FileSystem {
     path: PathBuf,
-    files: HashMap<Bucket, Arc<RwLock<FileHandle>>>,
+    files: BTreeMap<Bucket, Arc<RwLock<FileHandle>>>,
 }
 
 impl FileSystem {
-    pub fn new(path: PathBuf, bucket_issuer: BucketIssuer) -> FileSystem {
+    pub fn new(path: PathBuf, bucket_issuer: BucketIssuer) -> (FileSystem, Option<DataPage>) {
         fs::create_dir_all(path.clone());
         // Read the file system to build up an in-memory index of the
         // current file system. It doesn't matter that this is slow,
         // because this only happens on initialization.
-        let paths = fs::read_dir(&path)
+        let mut paths = fs::read_dir(&path)
             .unwrap()
             .collect::<Vec<Result<DirEntry, std::io::Error>>>()
             .into_iter()
@@ -29,7 +32,10 @@ impl FileSystem {
             .map(|v| (v.file_name().into_string().unwrap().parse::<UnixTime>().unwrap(), v))
             .collect::<Vec<(UnixTime, DirEntry)>>();
 
-        let mut files = HashMap::new();
+        paths.sort_by(|(a,_),(b,_)| a.cmp(b));
+
+        let mut files = BTreeMap::new();
+        let mut last: Option<Arc<RwLock<FileHandle>>> = None;
 
         for (date, entry) in paths {
             let bucket = bucket_issuer.get_bucket_for(date);
@@ -37,12 +43,36 @@ impl FileSystem {
             let arc = Arc::new(RwLock::new(node));
 
             files.insert(bucket, arc.clone());
+            last = Some(arc.clone());
         }
 
-        return FileSystem {
+        let mut file_system = FileSystem {
             path,
             files
         };
+
+        let page = last.map(|v| {
+            let guard = v.write().unwrap();
+            return file_system.create_page(guard.bucket);
+        });
+
+        return (file_system, page);
+    }
+
+    pub fn get_last_time(&self) -> UnixTime {
+        let last = self.files.last_key_value();
+
+        return match last {
+            Some((bucket, file)) => {
+                let page = DataPage::open_page(bucket.clone(), file.clone());
+
+                let records = page.read();
+                let last = records[records.len()-1];
+
+                return last.timestamp;
+            }
+            None => 0
+        }
     }
 
     pub fn create_page(&mut self, bucket: Bucket) -> DataPage {
@@ -52,13 +82,8 @@ impl FileSystem {
             return DataPage::open_page(bucket, v.clone());
         }
 
-        let file_handle = FileHandle::new(self.path.clone().join(bucket.value.to_string()), bucket);
-        File::create(&file_handle.path).unwrap();
-
-        let arc = Arc::new(RwLock::new(file_handle));
-        self.files.insert(bucket, arc.clone());
-
-        return DataPage::open_page(bucket, arc)
+        let file = self.create(bucket);
+        return DataPage::open_page(bucket, file)
     }
 
     pub fn update_page(&mut self, mut page: DataPage, bucket: Bucket) -> DataPage {
@@ -68,12 +93,17 @@ impl FileSystem {
             return page.update(bucket, v.clone());
         }
 
-        let file_handle = FileHandle::new(self.path.clone().join(bucket.value.to_string()), bucket);
-        File::create(&file_handle.path).unwrap();
+        let file = self.create(bucket);
+        return page.update(bucket, file)
+    }
+
+    fn create(&mut self, bucket: Bucket) -> Arc<RwLock<FileHandle>> {
+        let file_handle = FileHandle::new(
+            self.path.clone().join(bucket.value.to_string()), bucket);
 
         let arc = Arc::new(RwLock::new(file_handle));
         self.files.insert(bucket, arc.clone());
 
-        return page.update(bucket, arc)
+        return arc;
     }
 }
