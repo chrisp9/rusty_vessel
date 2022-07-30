@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::current;
 use chrono::{DateTime, Utc};
 use crate::Blob;
-use crate::storage::bucket_issuer::{BucketIssuer, UnixTime};
+use crate::domain::UnixTime;
 use crate::storage::domain::bucket::Bucket;
 use crate::storage::domain::data_page::DataPage;
 use crate::storage::file_handle::FileHandle;
@@ -20,7 +20,7 @@ pub struct FileSystem {
 }
 
 impl FileSystem {
-    pub fn new(path: PathBuf, bucket_issuer: BucketIssuer) -> (FileSystem, Option<DataPage>) {
+    pub fn new(path: PathBuf, page_length: i64) -> (FileSystem, Option<DataPage>) {
         fs::create_dir_all(path.clone());
         // Read the file system to build up an in-memory index of the
         // current file system. It doesn't matter that this is slow,
@@ -39,7 +39,7 @@ impl FileSystem {
         let mut last: Option<Arc<RwLock<FileHandle>>> = None;
 
         for (date, entry) in paths {
-            let bucket = bucket_issuer.get_bucket_for(date);
+            let bucket = Bucket::new(date, page_length);
             let node = FileHandle::new(entry.path(), bucket);
             let arc = Arc::new(RwLock::new(node));
 
@@ -115,7 +115,7 @@ impl FileSystem {
 
     fn create(&mut self, bucket: Bucket) -> Arc<RwLock<FileHandle>> {
         let file_handle = FileHandle::new(
-            self.path.clone().join(bucket.value.to_string()), bucket);
+            self.path.clone().join(bucket.val.to_string()), bucket);
 
         let arc = Arc::new(RwLock::new(file_handle));
         self.files.insert(bucket, arc.clone());

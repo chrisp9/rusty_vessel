@@ -1,4 +1,5 @@
-use crate::{ArcRead, Blob, UnixTime};
+use crate::{ArcRead, Blob};
+use crate::domain::UnixTime;
 
 pub trait Stream {
     fn subscribe(&mut self, stream: ArcRead<Box<dyn Stream + Send + Sync>>);
@@ -7,7 +8,7 @@ pub trait Stream {
 }
 
 pub enum StreamMsg {
-    Snapshot(Vec<Blob>),
-    Delta(Blob),
+    Batch(Vec<Blob>),
+    Tick(Blob),
     Subscribe(ArcRead<Box<dyn Stream + Send + Sync>>),
 }

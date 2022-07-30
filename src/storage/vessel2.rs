@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use crate::{ArcRead, threading};
-use crate::storage::bucket_issuer::{BucketIssuer, UnixTime};
+use crate::domain::UnixTime;
 use crate::storage::domain::blob::Blob;
 use crate::storage::domain::bucket::Bucket;
 use crate::storage::domain::data_page::DataPage;
@@ -18,8 +18,8 @@ use crate::threading::ArcRw;
 pub struct Vessel {
     pub path: PathBuf,
     file_system: ArcRw<FileSystem>,
-    bucket_issuer: BucketIssuer,
-    current_page: ArcRw<Option<DataPage>>
+    current_page: ArcRw<Option<DataPage>>,
+    page_length: i64
 }
 
 const BUFFER_SIZE: i32 = 1000;
@@ -28,23 +28,22 @@ impl Vessel {
     pub fn new(
         db_root: &str,
         key: &str,
-        stride: chrono::Duration)
+        page_length: chrono::Duration)
         -> ArcRw<Vessel>
     {
         let path = Path::new(db_root).join(key);
-        let bucket_issuer = BucketIssuer::new(BUFFER_SIZE, stride);
 
         let (mut file_system, page) = FileSystem::new(
             path.clone(),
-            bucket_issuer.clone());
+        page_length.num_milliseconds());
 
         let data_page = ArcRw::new(page);
 
         let vessel =  Vessel {
             path,
             file_system: ArcRw::new(file_system),
-            bucket_issuer,
-            current_page: data_page
+            current_page: data_page,
+            page_length: page_length.num_milliseconds()
         };
 
         let vessel = ArcRw::new(vessel);
@@ -70,14 +69,13 @@ impl Vessel {
     }
 
     pub fn write(&mut self, record: Blob) {
-        let this_bucket = self
-            .bucket_issuer
-            .get_bucket_for(record.timestamp);
+        let this_bucket = Bucket::new(
+            record.timestamp,
+            self.page_length);
 
         let mut this_page= self.current_page.write_lock();
 
         match this_page.as_mut() {
-
             None => {
                 let mut fs = self.file_system.write_lock();
 
@@ -85,19 +83,19 @@ impl Vessel {
                 that_page.write(record);
 
                 this_page.replace(that_page);
-
             }
 
             Some(v) => {
                 let mut chunk = this_page.take().unwrap();
 
-                if this_bucket.value == chunk.bucket.value {
+                if this_bucket.val == chunk.bucket.val {
                     chunk.write(record.clone());
                     this_page.replace(chunk);
+
                 } else {
                     println!("{} {}",
-                             this_bucket.value.to_string(),
-                             chunk.bucket.value.to_string());
+                             this_bucket.val.to_string(),
+                             chunk.bucket.val.to_string());
 
                     let mut fs = self.file_system.write_lock();
 
@@ -116,29 +114,27 @@ impl Vessel {
     pub fn read_from(&self, from: UnixTime) -> VesselIterator {
         return VesselIterator::new(
             self.file_system.clone(),
-            self.bucket_issuer.clone(),
-        from);
+            Bucket::new(from, self.page_length),
+        Some(from));
     }
 }
 
 pub struct VesselIterator {
     pub fs: ArcRw<FileSystem>,
-    pub bucket_issuer: BucketIssuer,
-    pub start: Option<UnixTime>,
-    pub bucket: Bucket
+    pub bucket: Bucket,
+    pub start: Option<UnixTime>
 }
 
 impl VesselIterator {
     pub fn new(
         fs: ArcRw<FileSystem>,
-        bucket_issuer: BucketIssuer,
-        start: UnixTime) -> VesselIterator
+        bucket: Bucket,
+        start: Option<UnixTime>) -> VesselIterator
     {
         return VesselIterator {
             fs,
-            bucket_issuer,
-            start: Some(start),
-            bucket: bucket_issuer.get_bucket_for(start)
+            bucket,
+            start
         };
     }
 }
@@ -149,6 +145,7 @@ impl Iterator for VesselIterator{
     fn next(&mut self) -> Option<Self::Item> {
         let lock = self.fs.read_lock();
         let mut data = lock.read(self.bucket);
+        println!("{}", data.len());
 
         if data.len() == 0 {
             return None;
@@ -163,10 +160,12 @@ impl Iterator for VesselIterator{
                 .into_iter()
                 .collect::<Vec::<Blob>>();
 
+            println!("{}", data.len());
+
             self.start = None;
         }
 
-        let bucket = self.bucket_issuer.next(self.bucket);
+        let bucket = self.bucket.next();
         self.bucket = bucket;
 
         return Some(data);

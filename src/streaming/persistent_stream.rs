@@ -1,11 +1,50 @@
 use std::{io, sync, thread};
 use std::sync::{Arc, RwLock};
 use crate::{Blob, Vessel};
-use crate::storage::bucket_issuer::UnixTime;
 use crate::threading::{ArcRead, ArcRw};
 use std::sync::mpsc::{Receiver, sync_channel, SyncSender};
+use crate::domain::UnixTime;
+use crate::storage::domain::bucket::Bucket;
 use crate::streaming::domain::{Stream, StreamMsg};
 
+pub trait Processor {
+    fn process(input: Blob) -> Option<Blob>;
+}
+
+pub struct BufferBucket {
+    buf: Vec<Blob>,
+    bucket: Bucket
+}
+
+impl BufferBucket {
+    pub fn new(bucket: Bucket) -> BufferBucket {
+        return BufferBucket{buf: Vec::new(), bucket};
+    }
+}
+
+
+pub struct StaticWindowProcessor {
+    buffer: BufferBucket
+}
+
+impl StaticWindowProcessor {
+    pub fn new(window_size: chrono::Duration) -> StaticWindowProcessor {
+        let bucket = Bucket::epoch(window_size.num_milliseconds());
+        let buffer = BufferBucket::new(bucket);
+
+        return StaticWindowProcessor {
+            buffer
+        }
+    }
+}
+
+impl Processor for StaticWindowProcessor {
+    
+
+    fn process(input: Blob) -> Option<Blob> {
+
+    }
+}
 
 pub struct PersistentStream {
     stream_chan: SyncSender<StreamMsg>,
@@ -31,22 +70,35 @@ impl PersistentStream {
     {
         thread::spawn(move || {
             let recv = recv;
-            let send = send;
+            let db = send;
+
+            let mut subscribers: Vec<ArcRead<Box<dyn Stream + Send + Sync>>> = Vec::new();
+            let subscribers_borrow = &mut subscribers;
 
             loop {
                 let recv_result = recv.recv();
                 let next = recv_result.unwrap();
 
                 match next {
-                    StreamMsg::Snapshot(data) => {
-                        for blob in data.iter() {
-                            let blob = blob.clone();
+                    StreamMsg::Batch(data) => {
+                        for subscriber in &mut *subscribers_borrow {
+                            let subscriber = subscriber.clone();
+                            let lock = subscriber.read_lock();
+                            lock.on_next(StreamMsg::Batch(data.clone()));
+                        }
 
-                            send.send(blob.clone()).unwrap();
+                        for blob in data.iter() {
+                            db.send(blob.clone()).unwrap();
                         }
                     }
-                    StreamMsg::Delta(data) => {
-                        send.send(data).unwrap();
+                    StreamMsg::Tick(data) => {
+                        for subscriber in &mut *subscribers_borrow {
+                            let subscriber = subscriber.clone();
+                            let lock = subscriber.read_lock();
+                            lock.on_next(StreamMsg::Tick(data));
+                        }
+
+                        db.send(data).unwrap();
                     }
                     StreamMsg::Subscribe(subscriber) => {
                         let subscriber_lock = subscriber.read_lock();
@@ -56,12 +108,15 @@ impl PersistentStream {
                         let self_last_tick = self_lock.get_last_time();
 
                         if subscriber_last_tick < self_last_tick {
-                            let data = self_lock.read_from(self_last_tick);
+                            let data = self_lock.read_from(subscriber_last_tick);
 
                             for item in data {
-                                subscriber_lock.on_next(StreamMsg::Snapshot(item));
+                                subscriber_lock.on_next(StreamMsg::Batch(item));
                             }
                         }
+
+
+                        (&mut *subscribers_borrow).push(subscriber.clone());
                     }
                 }
             }
@@ -70,10 +125,10 @@ impl PersistentStream {
 
     pub fn new(mut vessel: ArcRw<Vessel>) -> PersistentStream {
         let (db_send, db_recv) =
-            sync_channel(10);
+            sync_channel(500000);
 
         let (stream_send, stream_recv) =
-            sync_channel(10);
+            sync_channel(500000);
 
         Self::run_db_loop(vessel.clone(), db_recv);
         Self::run_stream_loop(vessel.clone(), db_send, stream_recv);
