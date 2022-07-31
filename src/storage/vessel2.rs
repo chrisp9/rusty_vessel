@@ -1,6 +1,6 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
-use std::fs;
+use std::{fs, thread};
 use std::fs::{DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::ops::{Deref, DerefMut};
@@ -49,7 +49,7 @@ impl Vessel {
         let vessel = ArcRw::new(vessel);
         let flush_vessel = vessel.clone();
 
-        tokio::task::spawn(async move {
+        thread::spawn(move|| {
             loop {
                 {
                     let vessel = flush_vessel.write_lock();
@@ -61,50 +61,45 @@ impl Vessel {
                     }
                 }
 
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                thread::sleep(Duration::from_secs(1));
             }
         });
 
         return vessel;
     }
 
-    pub fn write(&mut self, record: Blob) {
-        let this_bucket = Bucket::for_time(
-            record.timestamp,
-            self.page_length);
 
+    pub fn write(&self, records: &Vec<Blob>) {
         let mut this_page= self.current_page.write_lock();
 
-        match this_page.as_mut() {
-            None => {
-                let mut fs = self.file_system.write_lock();
+        for record in records {
+            let record_bucket = Bucket::for_time(
+                record.timestamp,
+                self.page_length);
 
-                let mut that_page = fs.create_page(this_bucket);
-                that_page.write(record);
-
-                this_page.replace(that_page);
-            }
-
-            Some(v) => {
-                let mut chunk = this_page.take().unwrap();
-
-                if this_bucket.val == chunk.bucket.val {
-                    chunk.write(record.clone());
-                    this_page.replace(chunk);
-
-                } else {
-                    println!("{} {}",
-                             this_bucket.val.to_string(),
-                             chunk.bucket.val.to_string());
-
+            let page = this_page.as_mut();
+            match page {
+                Some(v) if v.bucket == record_bucket => {
+                    v.write(record.clone());
+                },
+                Some(_) => {
                     let mut fs = self.file_system.write_lock();
+                    let old_page = this_page.take().unwrap();
+                    let mut next_page = fs.turn_page(old_page, record_bucket);
 
-                    let that_page = fs.update_page(chunk, this_bucket);
-                    this_page.replace(that_page);
+                    next_page.write(record.clone());
+                    this_page.replace(next_page);
+                }
+                None => {
+                    let mut fs = self.file_system.write_lock();
+                    let mut next_page = fs.create_page(record_bucket);
+                    next_page.write(record.clone());
+                    this_page.replace(next_page);
                 }
             }
         }
     }
+
 
     pub fn get_last_time(&self) -> UnixTime{
         let mut lock = self.file_system.read_lock();

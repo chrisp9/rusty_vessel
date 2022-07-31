@@ -52,15 +52,40 @@ impl StaticWindowProcessor {
 
 pub struct PersistentStream {
     stream_chan: Arc<Sender<StreamMsg>>,
-    last_tick_time: ArcRw<UnixTime>
+    last_tick_time: ArcRw<UnixTime>,
+    chan_buf_size: i32
 }
 
 impl PersistentStream {
-    pub fn run_db_loop(mut vessel: ArcRw<Vessel>, mut recv: Receiver<Blob>) {
+    pub fn run_db_loop(&self, mut vessel: ArcRw<Vessel>, mut recv: Receiver<Blob>) {
+        let chan_size = 50;
+
         tokio::spawn(async move {
-            while let Some(next) = recv.recv().await {
-                let mut lock = vessel.write_lock();
-                lock.write(next);
+            let mut buf = Vec::<Blob>::with_capacity(
+                chan_size);
+
+            loop {
+                let next = recv.recv().await.unwrap();
+                buf.push(next);
+
+                while buf.len() < buf.capacity()
+                {
+                    if let Ok(next) = recv.try_recv() {
+                        buf.push(next);
+                    }
+                    else {
+                        break;
+                    }
+                }
+
+                {
+                    let lock = vessel.write_lock();
+                    lock.write(&mut buf);
+                    buf.clear();
+                }
+
+                tokio::task::yield_now().await;
+
             }
         });
     }
@@ -121,22 +146,27 @@ impl PersistentStream {
     }
 
     pub fn new(mut vessel: ArcRw<Vessel>) -> PersistentStream {
+        let buf_size = 10000;
+
         let (db_send, db_recv) =
-            tokio::sync::mpsc::channel(1000);
+            tokio::sync::mpsc::channel(buf_size);
 
         let (stream_send, stream_recv) =
-            tokio::sync::mpsc::channel(1000);
-
-        Self::run_db_loop(vessel.clone(), db_recv);
-        Self::run_stream_loop(vessel.clone(), db_send.clone(), stream_recv);
+            tokio::sync::mpsc::channel(buf_size);
 
         let lock = vessel.read_lock();
         let last_time = lock.get_last_time();
 
-        return PersistentStream {
+        let stream = PersistentStream {
             stream_chan: Arc::new(stream_send),
-            last_tick_time: ArcRw::new(last_time)
+            last_tick_time: ArcRw::new(last_time),
+            chan_buf_size: buf_size as i32
         };
+
+        stream.run_db_loop(vessel.clone(), db_recv);
+        Self::run_stream_loop(vessel.clone(), db_send.clone(), stream_recv);
+
+        return stream;
     }
 }
 

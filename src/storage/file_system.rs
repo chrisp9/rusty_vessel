@@ -102,7 +102,7 @@ impl FileSystem {
         return DataPage::open_page(bucket, file)
     }
 
-    pub fn update_page(&mut self, mut page: DataPage, bucket: Bucket) -> DataPage {
+    pub fn turn_page(&mut self, page: DataPage, bucket: Bucket) -> DataPage {
         let file = self.files.get(&bucket);
 
         if let Some(v) = file {
