@@ -3,8 +3,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::storage::file_system::FileSystem;
 
+#[derive(Debug)]
 pub struct ArcRead<T: ?Sized> {
-    item: Arc<RwLock<T>>
+    item: Arc<RwLock<T>>,
 }
 
 impl <T> ArcRead<T> {

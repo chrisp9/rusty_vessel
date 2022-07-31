@@ -111,7 +111,7 @@ impl DataPage {
 
         let mut writer = BufWriter::new(&file);
 
-        for &blob in self.data.iter() {
+        for blob in self.data.iter() {
 
             let timestamp = i64::to_ne_bytes(blob.timestamp);
             let data = f64::to_ne_bytes(blob.data);

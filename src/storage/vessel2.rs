@@ -28,14 +28,14 @@ impl Vessel {
     pub fn new(
         db_root: &str,
         key: &str,
-        page_length: chrono::Duration)
+        page_length: i64)
         -> ArcRw<Vessel>
     {
         let path = Path::new(db_root).join(key);
 
         let (mut file_system, page) = FileSystem::new(
             path.clone(),
-        page_length.num_milliseconds());
+        page_length);
 
         let data_page = ArcRw::new(page);
 
@@ -43,7 +43,7 @@ impl Vessel {
             path,
             file_system: ArcRw::new(file_system),
             current_page: data_page,
-            page_length: page_length.num_milliseconds()
+            page_length: page_length as i64
         };
 
         let vessel = ArcRw::new(vessel);
@@ -69,7 +69,7 @@ impl Vessel {
     }
 
     pub fn write(&mut self, record: Blob) {
-        let this_bucket = Bucket::new(
+        let this_bucket = Bucket::for_time(
             record.timestamp,
             self.page_length);
 
@@ -114,7 +114,7 @@ impl Vessel {
     pub fn read_from(&self, from: UnixTime) -> VesselIterator {
         return VesselIterator::new(
             self.file_system.clone(),
-            Bucket::new(from, self.page_length),
+            Bucket::for_time(from, self.page_length),
         Some(from));
     }
 }
@@ -145,7 +145,6 @@ impl Iterator for VesselIterator{
     fn next(&mut self) -> Option<Self::Item> {
         let lock = self.fs.read_lock();
         let mut data = lock.read(self.bucket);
-        println!("{}", data.len());
 
         if data.len() == 0 {
             return None;

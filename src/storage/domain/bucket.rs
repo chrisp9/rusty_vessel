@@ -17,4 +17,13 @@ impl Bucket {
     pub fn next(&self) -> Bucket {
         return Self::new(self.val + self.interval, self.interval);
     }
+
+    pub fn for_time(val: i64, interval: i64) -> Bucket {
+        let start = val - (val % interval);
+
+        return Bucket {
+            val: start,
+            interval
+        };
+    }
 }

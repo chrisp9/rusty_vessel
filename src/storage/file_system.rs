@@ -83,7 +83,7 @@ impl FileSystem {
                     return 0;
                 }
 
-                let last = records[records.len()-1];
+                let last = &records[records.len()-1];
 
                 return last.timestamp;
             }

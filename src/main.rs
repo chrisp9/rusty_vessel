@@ -2,12 +2,15 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
 
+extern crate core;
+
 use std::collections::HashMap;
 use std::fs;
 use std::fs::{DirEntry, File, OpenOptions, read, read_dir};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
 use crate::storage::vessel2::Vessel;
@@ -31,9 +34,9 @@ pub struct TemperatureRecord {
     pub altitude: f64
 }
 
-fn new_stream(root: &str, name: &str, stride: chrono::Duration) -> PersistentStream {
+fn new_stream(root: &str, name: &str, page_size: i64) -> PersistentStream {
     let mut vessel = Vessel::new(
-        root, name, stride);
+        root, name, page_size);
 
     let stream = PersistentStream::new(vessel);
     return stream;
@@ -44,20 +47,23 @@ async fn main() {
     let root = "/home/chris/rusty_vessel";
 
     let mut temp = new_stream(
-        root, "Temperature", chrono::Duration::minutes(1));
+        root, "Temperature", 10000 * 60000);
 
-    let mut data = Vec::<ArcRead<Box<(dyn Stream + Send + Sync)>>>::new();
+    let mut data = Vec::<Arc<Box<(dyn Stream + Send + Sync)>>>::new();
 
     let v = vec![0;10];
 
     for (n, _) in v.iter().enumerate() {
         let mut alt = new_stream(
-            root, format!("alt_{}", n).as_str(), chrono::Duration::minutes(1));
+            root,
+            format!("alt_{}", n).as_str(),
+            10000 * 60000);
 
-        let alt : ArcRead<Box<(dyn Stream + Send + Sync)>> = ArcRead::new(Box::new(alt));
+        let alt : Arc<Box<(dyn Stream + Send + Sync)>> =
+            Arc::new(Box::new(alt));
 
         data.push(alt.clone());
-        temp.subscribe(alt.clone());
+        temp.subscribe(alt.clone()).await;
     }
 
     let record = TemperatureRecord {
@@ -72,11 +78,14 @@ async fn main() {
         let blob = Blob::new(i, record.temp.clone());
         {
             let data = StreamMsg::Tick(blob);
-            temp.on_next(data);
+            temp.on_next(data).await;
         }
+
+        tokio::task::yield_now().await;
 
         //time::sleep(Duration::from_millis(100)).await;
     }
 
     time::sleep(Duration::from_secs(100000)).await;
 }
+

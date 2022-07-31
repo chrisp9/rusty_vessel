@@ -1,11 +1,17 @@
 use std::{io, sync, thread};
+use std::ops::DerefMut;
+use std::rc::Rc;
 use std::sync::{Arc, RwLock};
+use futures::{FutureExt, StreamExt};
+use tokio::runtime::Handle;
 use crate::{Blob, Vessel};
 use crate::threading::{ArcRead, ArcRw};
-use std::sync::mpsc::{Receiver, sync_channel, SyncSender};
 use crate::domain::UnixTime;
 use crate::storage::domain::bucket::Bucket;
 use crate::streaming::domain::{Stream, StreamMsg};
+use tokio::sync::mpsc::{Receiver, Sender};
+use async_trait::async_trait;
+use crate::storage::vessel2::VesselIterator;
 
 pub trait Processor {
     fn process(input: Blob) -> Option<Blob>;
@@ -22,7 +28,6 @@ impl BufferBucket {
     }
 }
 
-
 pub struct StaticWindowProcessor {
     buffer: BufferBucket
 }
@@ -38,26 +43,23 @@ impl StaticWindowProcessor {
     }
 }
 
-impl Processor for StaticWindowProcessor {
-    
-
-    fn process(input: Blob) -> Option<Blob> {
-
-    }
-}
+// impl Processor for StaticWindowProcessor {
+//     fn process(&mut self, input: Blob) -> Option<Blob> {
+//
+//
+//     }
+// }
 
 pub struct PersistentStream {
-    stream_chan: SyncSender<StreamMsg>,
+    stream_chan: Arc<Sender<StreamMsg>>,
     last_tick_time: ArcRw<UnixTime>
 }
 
 impl PersistentStream {
-    pub fn run_db_loop(mut vessel: ArcRw<Vessel>, recv: Receiver<Blob>) {
-        thread::spawn(move || {
-            loop {
-                let next = recv.recv().unwrap();
+    pub fn run_db_loop(mut vessel: ArcRw<Vessel>, mut recv: Receiver<Blob>) {
+        tokio::spawn(async move {
+            while let Some(next) = recv.recv().await {
                 let mut lock = vessel.write_lock();
-
                 lock.write(next);
             }
         });
@@ -65,58 +67,53 @@ impl PersistentStream {
 
     pub fn run_stream_loop(
         mut vessel: ArcRw<Vessel>,
-        send: SyncSender<Blob>,
+        send: Sender<Blob>,
         recv: Receiver<StreamMsg>)
     {
-        thread::spawn(move || {
-            let recv = recv;
-            let db = send;
+        tokio::spawn(async move {
+            let mut recv = recv;
+            let mut db = send;
 
-            let mut subscribers: Vec<ArcRead<Box<dyn Stream + Send + Sync>>> = Vec::new();
+            let mut subscribers: Vec<Arc<Box<dyn Stream + Send + Sync>>> = Vec::new();
             let subscribers_borrow = &mut subscribers;
 
-            loop {
-                let recv_result = recv.recv();
-                let next = recv_result.unwrap();
-
+            while let Some(next) = recv.recv().await {
                 match next {
                     StreamMsg::Batch(data) => {
                         for subscriber in &mut *subscribers_borrow {
-                            let subscriber = subscriber.clone();
-                            let lock = subscriber.read_lock();
-                            lock.on_next(StreamMsg::Batch(data.clone()));
+                            subscriber.on_next(StreamMsg::Batch(data.clone())).await;
                         }
 
-                        for blob in data.iter() {
-                            db.send(blob.clone()).unwrap();
+                        for blob in data.into_iter() {
+                            db.send(blob).await.unwrap();
                         }
                     }
                     StreamMsg::Tick(data) => {
                         for subscriber in &mut *subscribers_borrow {
-                            let subscriber = subscriber.clone();
-                            let lock = subscriber.read_lock();
-                            lock.on_next(StreamMsg::Tick(data));
+                            subscriber.on_next(StreamMsg::Tick(data)).await;
                         }
 
-                        db.send(data).unwrap();
+                        db.send(data).await.unwrap();
                     }
                     StreamMsg::Subscribe(subscriber) => {
-                        let subscriber_lock = subscriber.read_lock();
-                        let subscriber_last_tick = subscriber_lock.get_last_tick_time();
+                        let subscriber_last_tick = subscriber.get_last_tick_time();
 
-                        let self_lock = vessel.read_lock();
-                        let self_last_tick = self_lock.get_last_time();
+                        let iterator: VesselIterator;
+                        let self_last_tick: UnixTime;
+                        {
+                            let self_lock = vessel.read_lock();
+                            self_last_tick = self_lock.get_last_time();
+
+                            iterator = self_lock.read_from(subscriber_last_tick);
+                        }
 
                         if subscriber_last_tick < self_last_tick {
-                            let data = self_lock.read_from(subscriber_last_tick);
-
-                            for item in data {
-                                subscriber_lock.on_next(StreamMsg::Batch(item));
+                            for item in iterator {
+                                subscriber.on_next(StreamMsg::Batch(item)).await;
                             }
                         }
 
-
-                        (&mut *subscribers_borrow).push(subscriber.clone());
+                        (&mut *subscribers_borrow).push(subscriber);
                     }
                 }
             }
@@ -125,31 +122,32 @@ impl PersistentStream {
 
     pub fn new(mut vessel: ArcRw<Vessel>) -> PersistentStream {
         let (db_send, db_recv) =
-            sync_channel(500000);
+            tokio::sync::mpsc::channel(1000);
 
         let (stream_send, stream_recv) =
-            sync_channel(500000);
+            tokio::sync::mpsc::channel(1000);
 
         Self::run_db_loop(vessel.clone(), db_recv);
-        Self::run_stream_loop(vessel.clone(), db_send, stream_recv);
+        Self::run_stream_loop(vessel.clone(), db_send.clone(), stream_recv);
 
         let lock = vessel.read_lock();
         let last_time = lock.get_last_time();
 
         return PersistentStream {
-            stream_chan: stream_send,
+            stream_chan: Arc::new(stream_send),
             last_tick_time: ArcRw::new(last_time)
         };
     }
 }
 
+#[async_trait]
 impl Stream for PersistentStream {
-    fn subscribe(&mut self, stream: ArcRead<Box<dyn Stream + Send + Sync>>) {
-        self.stream_chan.send(StreamMsg::Subscribe(stream)).unwrap();
+    async fn subscribe(&mut self, stream: Arc<Box<dyn Stream + Send + Sync>>) {
+       self.stream_chan.send(StreamMsg::Subscribe(stream)).await;
     }
 
-    fn on_next(&self, msg: StreamMsg) {
-        self.stream_chan.send(msg).unwrap();
+    async fn on_next(&self, msg: StreamMsg) {
+        self.stream_chan.send(msg).await;
     }
 
     fn get_last_tick_time(&self) -> UnixTime {
