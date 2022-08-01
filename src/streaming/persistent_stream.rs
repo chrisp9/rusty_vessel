@@ -1,16 +1,18 @@
 use std::{io, sync, thread};
+use std::borrow::{Borrow, BorrowMut};
+use std::cell::RefCell;
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use futures::{FutureExt, StreamExt};
 use tokio::runtime::Handle;
-use crate::{Blob, Vessel};
+use crate::{Blob, StreamDefinition, Vessel};
 use crate::threading::{ArcRead, ArcRw};
 use crate::domain::UnixTime;
 use crate::storage::domain::bucket::Bucket;
 use crate::streaming::domain::{Stream, StreamMsg};
-use tokio::sync::mpsc::{Receiver, Sender};
 use async_trait::async_trait;
+use crossbeam::channel::{Receiver, Sender};
 use crate::storage::vessel2::VesselIterator;
 
 pub trait Processor {
@@ -19,17 +21,17 @@ pub trait Processor {
 
 pub struct BufferBucket {
     buf: Vec<Blob>,
-    bucket: Bucket
+    bucket: Bucket,
 }
 
 impl BufferBucket {
     pub fn new(bucket: Bucket) -> BufferBucket {
-        return BufferBucket{buf: Vec::new(), bucket};
+        return BufferBucket { buf: Vec::new(), bucket };
     }
 }
 
 pub struct StaticWindowProcessor {
-    buffer: BufferBucket
+    buffer: BufferBucket,
 }
 
 impl StaticWindowProcessor {
@@ -39,7 +41,7 @@ impl StaticWindowProcessor {
 
         return StaticWindowProcessor {
             buffer
-        }
+        };
     }
 }
 
@@ -51,137 +53,105 @@ impl StaticWindowProcessor {
 // }
 
 pub struct PersistentStream {
-    stream_chan: Arc<Sender<StreamMsg>>,
-    last_tick_time: ArcRw<UnixTime>,
-    chan_buf_size: i32
+    pub stream_def: StreamDefinition,
+    vessel: Vessel,
+    subscribers: RefCell<Vec<Rc<dyn Stream>>>,
 }
 
 impl PersistentStream {
-    pub fn run_db_loop(&self, mut vessel: ArcRw<Vessel>, mut recv: Receiver<Blob>) {
-        let chan_size = 50;
+    pub fn new(stream_def: StreamDefinition, vessel: Vessel) -> PersistentStream {
+        return PersistentStream {
+            stream_def,
+            vessel,
+            subscribers: RefCell::new(vec![])
+        }
+    }
+}
 
-        tokio::spawn(async move {
-            let mut buf = Vec::<Blob>::with_capacity(
-                chan_size);
+impl Stream for PersistentStream {
+    fn subscribe(&self, parent: StreamDefinition, stream: Rc<dyn Stream>) {
+        if self.stream_def == parent {
+            let mut subs = self.subscribers.borrow_mut();
+            subs.push(stream.clone());
 
-            loop {
-                let next = recv.recv().await.unwrap();
-                buf.push(next);
+            let it = self.vessel.read_from(self.vessel.get_last_time());
 
-                while buf.len() < buf.capacity()
-                {
-                    if let Ok(next) = recv.try_recv() {
-                        buf.push(next);
-                    }
-                    else {
-                        break;
-                    }
-                }
-
-                {
-                    let lock = vessel.write_lock();
-                    lock.write(&mut buf);
-                    buf.clear();
-                }
-
-                tokio::task::yield_now().await;
-
+            for batch in it {
+                let batch = StreamMsg::Batch(batch);
+                stream.on_next(Rc::new(batch));
             }
-        });
+        }
     }
 
-    pub fn run_stream_loop(
-        mut vessel: ArcRw<Vessel>,
-        send: Sender<Blob>,
-        recv: Receiver<StreamMsg>)
-    {
-        tokio::spawn(async move {
-            let mut recv = recv;
-            let mut db = send;
+    fn on_next(&self, record: Rc<StreamMsg>) {
+        let subs = self.subscribers.borrow_mut();
 
-            let mut subscribers: Vec<Arc<Box<dyn Stream + Send + Sync>>> = Vec::new();
-            let subscribers_borrow = &mut subscribers;
+        for subscriber in subs.iter() {
+            subscriber.on_next(record.clone());
+        }
 
-            while let Some(next) = recv.recv().await {
-                match next {
-                    StreamMsg::Batch(data) => {
-                        for subscriber in &mut *subscribers_borrow {
-                            subscriber.on_next(StreamMsg::Batch(data.clone())).await;
-                        }
-
-                        for blob in data.into_iter() {
-                            db.send(blob).await.unwrap();
-                        }
-                    }
-                    StreamMsg::Tick(data) => {
-                        for subscriber in &mut *subscribers_borrow {
-                            subscriber.on_next(StreamMsg::Tick(data)).await;
-                        }
-
-                        db.send(data).await.unwrap();
-                    }
-                    StreamMsg::Subscribe(subscriber) => {
-                        let subscriber_last_tick = subscriber.get_last_tick_time();
-
-                        let iterator: VesselIterator;
-                        let self_last_tick: UnixTime;
-                        {
-                            let self_lock = vessel.read_lock();
-                            self_last_tick = self_lock.get_last_time();
-
-                            iterator = self_lock.read_from(subscriber_last_tick);
-                        }
-
-                        if subscriber_last_tick < self_last_tick {
-                            for item in iterator {
-                                subscriber.on_next(StreamMsg::Batch(item)).await;
-                            }
-                        }
-
-                        (&mut *subscribers_borrow).push(subscriber);
-                    }
-                }
+        match record.borrow() {
+            StreamMsg::Batch(ref b) => {
+                self.vessel.write(b);
+            },
+            StreamMsg::Tick(b) => {
+                let vector = vec![b.clone()];
+                self.vessel.write(&vector);
+            },
+            StreamMsg::Flush() => {
+                self.vessel.flush();
             }
-        });
+        }
+
     }
 
-    pub fn new(mut vessel: ArcRw<Vessel>) -> PersistentStream {
-        let buf_size = 10000;
+    fn flush(&self) {
+        self.vessel.flush();
+    }
+}
 
-        let (db_send, db_recv) =
-            tokio::sync::mpsc::channel(buf_size);
 
-        let (stream_send, stream_recv) =
-            tokio::sync::mpsc::channel(buf_size);
+pub struct RootStream {
+    pub stream_def: StreamDefinition,
+    subscribers: RefCell<Vec<Rc<dyn Stream>>>
+}
 
-        let lock = vessel.read_lock();
-        let last_time = lock.get_last_time();
+impl RootStream {
+    pub fn new(
+        stream_def: StreamDefinition) -> RootStream{
 
-        let stream = PersistentStream {
-            stream_chan: Arc::new(stream_send),
-            last_tick_time: ArcRw::new(last_time),
-            chan_buf_size: buf_size as i32
+        return RootStream {
+            stream_def,
+            subscribers: RefCell::new(vec![])
         };
 
-        stream.run_db_loop(vessel.clone(), db_recv);
-        Self::run_stream_loop(vessel.clone(), db_send.clone(), stream_recv);
-
-        return stream;
     }
 }
 
-#[async_trait]
-impl Stream for PersistentStream {
-    async fn subscribe(&mut self, stream: Arc<Box<dyn Stream + Send + Sync>>) {
-       self.stream_chan.send(StreamMsg::Subscribe(stream)).await;
+impl Stream for RootStream {
+    fn subscribe(&self, parent: StreamDefinition, stream: Rc<dyn Stream>) {
+        if self.stream_def == parent {
+            let mut mut_borrow = self.subscribers.borrow_mut();
+            mut_borrow.push(stream.clone());
+        }
+        else {
+
+            for mut subscriber in self.subscribers.borrow_mut().iter() {
+                subscriber.subscribe(parent.clone(), stream.clone());
+            }
+        }
     }
 
-    async fn on_next(&self, msg: StreamMsg) {
-        self.stream_chan.send(msg).await;
+    fn on_next(&self, msg: Rc<StreamMsg>) {
+        for subscriber in self.subscribers.borrow_mut().iter() {
+            subscriber.on_next(msg.clone());
+        }
     }
 
-    fn get_last_tick_time(&self) -> UnixTime {
-        let lock = self.last_tick_time.read_lock();
-        return *lock;
+    fn flush(&self) {
+        for subscriber in self.subscribers.borrow_mut().iter() {
+            subscriber.flush();
+        }
     }
 }
+
