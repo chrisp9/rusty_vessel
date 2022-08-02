@@ -20,7 +20,7 @@ use crate::threading::ArcRw;
 pub struct Vessel {
     pub path: PathBuf,
     file_system: Rc<RefCell<FileSystem>>,
-    current_page: RefCell<Option<DataPage>>,
+    current_page: Option<DataPage>,
     page_length: i64
 }
 
@@ -44,7 +44,7 @@ impl Vessel {
         let vessel =  Vessel {
             path,
             file_system: Rc::new(RefCell::new(file_system)),
-            current_page: RefCell::new(data_page),
+            current_page: data_page,
             page_length: page_length as i64
         };
 
@@ -52,16 +52,15 @@ impl Vessel {
     }
 
     pub fn flush(&self) {
-        if self.current_page.borrow().is_some() {
-            let mut page = self.current_page.borrow_mut();
-            page.as_mut().unwrap().flush();
+        if self.current_page.is_some() {
+            self.current_page.unwrap().flush();
         }
     }
 
-    pub fn write(&self, records: &Vec<Blob>) {
-        let mut this_page =  self.current_page.borrow_mut();
+    pub fn write(&self, records: Rc<Vec<Blob>>) {
+        let mut this_page =  &self.current_page;
 
-        for record in records {
+        for record in &*records {
             let record_bucket = Bucket::for_time(
                 record.timestamp,
                 self.page_length);
@@ -110,7 +109,7 @@ pub struct VesselIterator {
     pub start: Option<UnixTime>
 }
 
-impl<'a> VesselIterator {
+impl VesselIterator {
     pub fn new(
         fs: Rc<RefCell<FileSystem>>,
         bucket: Bucket,

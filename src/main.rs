@@ -73,4 +73,3 @@ fn main() {
 
     time::sleep(Duration::from_secs(100000));
 }
-

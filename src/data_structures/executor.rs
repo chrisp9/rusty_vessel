@@ -1,38 +1,20 @@
-use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 use crossbeam::channel::Sender;
 use crate::{Blob, Stream, StreamMsg, Vessel};
-use crate::storage::vessel2::VesselIterator;
-use crate::streaming::persistent_stream::{PersistentStream, RootStream};
+use crate::streaming::persistent_stream::PersistentStream;
 
 #[derive(Clone)]
 pub struct StreamDefinition {
-    pub id: i16,
+    pub id: usize,
     pub name: String,
     pub page_size: usize
 }
 
-impl Hash for StreamDefinition {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl PartialEq<Self> for StreamDefinition {
-    fn eq(&self, other: &Self) -> bool {
-        return self.id == other.id;
-    }
-}
-
-impl Eq for StreamDefinition {
-
-}
-
 impl StreamDefinition {
-    pub fn new(id: i16, name: String, page_size: usize) -> StreamDefinition {
+    pub fn new(id: usize, name: String, page_size: usize) -> StreamDefinition {
         return StreamDefinition {
             id,
             name,
@@ -41,16 +23,18 @@ impl StreamDefinition {
     }
 }
 
-pub struct SubscriberList {
-    vessel: Vessel,
-    subscribers: Vec<StreamDefinition>
+pub struct Node {
+    defn: StreamDefinition,
+    stream: Box<dyn Stream>,
+    subscribers: Rc<Vec<StreamDefinition>
 }
 
-impl SubscriberList {
-    pub fn new(vessel: Vessel) -> SubscriberList {
-        return SubscriberList {
-            vessel,
-            subscribers: vec![]
+impl Node {
+    pub fn new(defn: StreamDefinition, stream: Box<dyn Stream>) -> Node {
+        return Node {
+            defn,
+            stream,
+            subscribers: Rc<Vec::<StreamDefinition>::new()
         };
     }
 }
@@ -58,7 +42,7 @@ impl SubscriberList {
 pub enum Envelope {
     Subscribe(StreamDefinition, StreamDefinition),
     Flush(),
-    Data(StreamDefinition, Vec<Blob>)
+    Data(Rc<Vec<Blob>)
 }
 
 pub struct Executor {
@@ -68,39 +52,56 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn new(root_stream_def: StreamDefinition, dir_path: String, buf_size: usize) -> Executor {
+    pub fn new(root: StreamDefinition, dir_path: String, buf_size: usize) -> Executor {
         let (sender, receiver) =
             crossbeam::channel::bounded::<Envelope>(buf_size);
 
-        let path = dir_path.clone();
+        let mut nodes = vec![];
 
         let thread = std::thread::spawn(move || {
             let local_dir_path = dir_path.clone();
-            let mut root = RootStream::new(root_stream_def, );
+
+            let root_stream = Self::create_stream(
+                local_dir_path.as_str(), root.clone());
+
+            let node = Node::new(root, root_stream);
+            nodes.push(node);
 
             loop {
                 let msg = receiver.recv().unwrap();
 
                 match msg {
                     Envelope::Subscribe(source, target) => {
-                        let vessel = Self::create_stream(
+                        let stream = Self::create_stream(
                             local_dir_path.as_str(), target.clone());
 
-                        root.subscribe(source, vessel);
+                        let mut node = Node::new(target.clone(), stream);
+                        let source_node = &mut nodes[source.id];
+                        let mut source = &source_node.subscribers;
+
+                        source.push(target);
+                        nodes.push(node);
+
+                        let mut it = &mut *source_node.stream.replay();
+
+                        for (_, batch) in it.enumerate() {
+                            Self::dispatch()
+                        }
                     },
                     Envelope::Flush() => {
-                        root.on_next(Rc::new(StreamMsg::Flush()));
+                        for node in nodes {
+                            node.stream.flush()
+                        }
                     }
-                    Envelope::Data(target, data) => {
-                        let batch = Rc::new(StreamMsg::Batch(data));
-                        root.on_next(batch);
+                    Envelope::Data(data) => {
+                        Self::dispatch(&nodes, root.clone(), data);
                     }
                 }
             }
         });
 
         let executor = Executor {
-            root: path,
+            root: dir_path.clone(),
             thread,
             stream: sender.clone()
         };
@@ -113,15 +114,30 @@ impl Executor {
         return executor;
     }
 
-    pub fn send_data(&self, target: StreamDefinition, data: Vec<Blob>) {
-        self.stream.send(Envelope::Data(target, data)).unwrap();
+    pub fn dispatch(nodes: &Vec<Node>, root: StreamDefinition, data: Rc<Vec<Blob>>) {
+        let mut results = vec![];
+        results.push((root, data));
+
+        while let Some((stream_def, input)) = results.pop() {
+            let node = &nodes[stream_def.id];
+            let output = node.stream.on_next(input);
+            results.push((node.defn.clone(), output))
+        }
+    }
+
+    pub fn new_node(&self, root: &str, defn: StreamDefinition) -> Node {
+        return Node::new(defn.clone(), Self::create_stream(root, defn));
+    }
+
+    pub fn send_data(&self, data: Rc<Vec<Blob>>) {
+        self.stream.send(Envelope::Data(data)).unwrap();
     }
 
     pub fn subscribe(&self, source: StreamDefinition, target: StreamDefinition) {
         self.stream.send(Envelope::Subscribe(source, target)).unwrap();
     }
 
-    fn create_stream(root: &str, def: StreamDefinition) -> Rc<dyn Stream> {
+    fn create_stream(root: &str, def: StreamDefinition) -> Box<dyn Stream> {
         let vessel = Vessel::new(
             root,
             def.name.as_str(),
@@ -129,7 +145,7 @@ impl Executor {
 
         let stream = PersistentStream::new(def.clone(), vessel);
 
-        return Rc::new(stream);
+        return Box::new(stream);
     }
 }
 
