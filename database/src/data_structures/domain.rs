@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::rc::Rc;
-use log::Record;
 use crate::{Blob, Stream};
 
 #[derive(Clone, Eq, Hash, PartialEq)]

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -9,7 +8,6 @@ use crate::{Blob, Stream, Vessel};
 use crate::data_structures::domain::{Envelope, Graph, Node, StreamDefinition};
 use crate::domain::UnixTime;
 use crate::streaming::persistent_stream::PersistentStream;
-
 
 pub struct Executor {
     root: String,
@@ -65,7 +63,7 @@ impl Executor {
                             stream.flush();
                             return v;
                         })
-                    }
+                    },
                     Envelope::Data(data) => {
                         let rc_data = Rc::new(data);
 
@@ -100,20 +98,6 @@ impl Executor {
             if x.is_some() {
                 return x.unwrap();
             }
-        }
-    }
-
-    pub fn dispatch(mut nodes: &mut Vec<Node>, root: StreamDefinition, data: Rc<Vec<Blob>>) {
-        let mut results = vec![];
-        results.push((root, data));
-
-        while let Some((stream_def, input)) = results.pop() {
-           // let mut node = &mut nodes[stream_def.id];
-            //let output = node.stream.on_next(input);
-
-           // for subscriber in &node.subscribers {
-           //     results.push((subscriber.clone(), output.clone()))
-           // }
         }
     }
 
