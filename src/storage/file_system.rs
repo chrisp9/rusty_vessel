@@ -16,7 +16,7 @@ use crate::storage::file_handle::FileHandle;
 
 pub struct FileSystem {
     path: PathBuf,
-    files: BTreeMap<Bucket, Arc<RwLock<FileHandle>>>,
+    files: BTreeMap<Bucket, Arc<RwLock<FileHandle>>>
 }
 
 impl FileSystem {

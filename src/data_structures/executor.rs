@@ -1,54 +1,21 @@
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use crossbeam::channel::Sender;
-use crate::{Blob, Stream, StreamMsg, Vessel};
+use crate::{Blob, Stream, Vessel};
+use crate::data_structures::domain::{Envelope, Graph, Node, StreamDefinition};
+use crate::domain::UnixTime;
 use crate::streaming::persistent_stream::PersistentStream;
 
-#[derive(Clone)]
-pub struct StreamDefinition {
-    pub id: usize,
-    pub name: String,
-    pub page_size: usize
-}
-
-impl StreamDefinition {
-    pub fn new(id: usize, name: String, page_size: usize) -> StreamDefinition {
-        return StreamDefinition {
-            id,
-            name,
-            page_size
-        };
-    }
-}
-
-pub struct Node {
-    defn: StreamDefinition,
-    stream: Box<dyn Stream>,
-    subscribers: Rc<Vec<StreamDefinition>
-}
-
-impl Node {
-    pub fn new(defn: StreamDefinition, stream: Box<dyn Stream>) -> Node {
-        return Node {
-            defn,
-            stream,
-            subscribers: Rc<Vec::<StreamDefinition>::new()
-        };
-    }
-}
-
-pub enum Envelope {
-    Subscribe(StreamDefinition, StreamDefinition),
-    Flush(),
-    Data(Rc<Vec<Blob>)
-}
 
 pub struct Executor {
     root: String,
-    thread: std::thread::JoinHandle<()>,
+    thread: thread::JoinHandle<()>,
     stream: Sender<Envelope>,
+    last_time: Arc<Mutex<Option<UnixTime>>>
 }
 
 impl Executor {
@@ -56,45 +23,55 @@ impl Executor {
         let (sender, receiver) =
             crossbeam::channel::bounded::<Envelope>(buf_size);
 
-        let mut nodes = vec![];
+        let local_dir_path = dir_path.clone();
+        let last_time = Arc::new(Mutex::new(None));
+        let last_time_ref = last_time.clone();
 
         let thread = std::thread::spawn(move || {
-            let local_dir_path = dir_path.clone();
+            let mut graph = Graph::new();
 
-            let root_stream = Self::create_stream(
-                local_dir_path.as_str(), root.clone());
+            let (root_stream, last) = Self::create_stream(
+                local_dir_path.clone().as_str(), root.clone());
 
-            let node = Node::new(root, root_stream);
-            nodes.push(node);
+            graph.add(root, root_stream);
+            {
+                let locked = last_time_ref.lock();
+                locked.unwrap().replace(last);
+            }
 
             loop {
                 let msg = receiver.recv().unwrap();
 
                 match msg {
                     Envelope::Subscribe(source, target) => {
-                        let stream = Self::create_stream(
-                            local_dir_path.as_str(), target.clone());
+                        let (stream, last) = Self::create_stream(
+                            local_dir_path.clone().as_str(), target.clone());
 
-                        let mut node = Node::new(target.clone(), stream);
-                        let source_node = &mut nodes[source.id];
-                        let mut source = &source_node.subscribers;
+                        graph.add(target.clone(), stream);
+                        graph.subscribe(source.clone(), target.clone());
 
-                        source.push(target);
-                        nodes.push(node);
-
-                        let mut it = &mut *source_node.stream.replay();
+                        let source =&mut graph.get_stream(source);
+                        let it = source.replay(last);
 
                         for (_, batch) in it.enumerate() {
-                            Self::dispatch()
+                            graph.visit(
+                                target.clone(),
+                                Rc::new(batch),
+                                |stream, input| stream.on_next(input));
                         }
                     },
                     Envelope::Flush() => {
-                        for node in nodes {
-                            node.stream.flush()
-                        }
+                        graph.visit_all(Rc::new(vec![]), |stream, v| {
+                            stream.flush();
+                            return v;
+                        })
                     }
                     Envelope::Data(data) => {
-                        Self::dispatch(&nodes, root.clone(), data);
+                        let rc_data = Rc::new(data);
+
+                        graph.visit_all(rc_data, |stream, input| {
+                            return stream.on_next(input);
+                        })
                     }
                 }
             }
@@ -103,7 +80,8 @@ impl Executor {
         let executor = Executor {
             root: dir_path.clone(),
             thread,
-            stream: sender.clone()
+            stream: sender.clone(),
+            last_time: last_time.clone(),
         };
 
         thread::spawn(move|| {
@@ -114,22 +92,32 @@ impl Executor {
         return executor;
     }
 
-    pub fn dispatch(nodes: &Vec<Node>, root: StreamDefinition, data: Rc<Vec<Blob>>) {
+    pub fn get_last_time(&self) -> UnixTime {
+        loop {
+            let locked = self.last_time.lock();
+            let x = &*locked.unwrap();
+
+            if x.is_some() {
+                return x.unwrap();
+            }
+        }
+    }
+
+    pub fn dispatch(mut nodes: &mut Vec<Node>, root: StreamDefinition, data: Rc<Vec<Blob>>) {
         let mut results = vec![];
         results.push((root, data));
 
         while let Some((stream_def, input)) = results.pop() {
-            let node = &nodes[stream_def.id];
-            let output = node.stream.on_next(input);
-            results.push((node.defn.clone(), output))
+           // let mut node = &mut nodes[stream_def.id];
+            //let output = node.stream.on_next(input);
+
+           // for subscriber in &node.subscribers {
+           //     results.push((subscriber.clone(), output.clone()))
+           // }
         }
     }
 
-    pub fn new_node(&self, root: &str, defn: StreamDefinition) -> Node {
-        return Node::new(defn.clone(), Self::create_stream(root, defn));
-    }
-
-    pub fn send_data(&self, data: Rc<Vec<Blob>>) {
+    pub fn send_data(&self, data: Vec<Blob>) {
         self.stream.send(Envelope::Data(data)).unwrap();
     }
 
@@ -137,15 +125,17 @@ impl Executor {
         self.stream.send(Envelope::Subscribe(source, target)).unwrap();
     }
 
-    fn create_stream(root: &str, def: StreamDefinition) -> Box<dyn Stream> {
+    fn create_stream(root: &str, def: StreamDefinition) -> (Box<dyn Stream>, UnixTime) {
         let vessel = Vessel::new(
             root,
             def.name.as_str(),
             def.page_size as i64);
 
+        let last_time = &vessel.get_last_time();
+
         let stream = PersistentStream::new(def.clone(), vessel);
 
-        return Box::new(stream);
+        return (Box::new(stream), last_time.clone());
     }
 }
 

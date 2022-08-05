@@ -21,7 +21,7 @@ pub struct Vessel {
     pub path: PathBuf,
     file_system: Rc<RefCell<FileSystem>>,
     current_page: Option<DataPage>,
-    page_length: i64
+    page_length: i64,
 }
 
 const BUFFER_SIZE: i32 = 1000;
@@ -51,14 +51,16 @@ impl Vessel {
         return vessel;
     }
 
-    pub fn flush(&self) {
-        if self.current_page.is_some() {
-            self.current_page.unwrap().flush();
+    pub fn flush(&mut self) {
+        let page = &mut self.current_page;
+
+        if page.is_some() {
+            page.as_mut().unwrap().flush();
         }
     }
 
-    pub fn write(&self, records: Rc<Vec<Blob>>) {
-        let mut this_page =  &self.current_page;
+    pub fn write(&mut self, records: Rc<Vec<Blob>>) {
+        let mut this_page =  &mut self.current_page;
 
         for record in &*records {
             let record_bucket = Bucket::for_time(
@@ -95,7 +97,6 @@ impl Vessel {
     }
 
     pub fn read_from(&self, from: UnixTime) -> VesselIterator {
-
         return VesselIterator::new(
             self.file_system.clone(),
             Bucket::for_time(from, self.page_length),
@@ -143,8 +144,6 @@ impl Iterator for VesselIterator{
                 .filter(|blob| blob.timestamp > v)
                 .into_iter()
                 .collect::<Vec::<Blob>>();
-
-            println!("{}", data.len());
 
             self.start = None;
         }
