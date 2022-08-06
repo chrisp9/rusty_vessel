@@ -3,6 +3,7 @@
 #![feature(type_alias_impl_trait)]
 
 extern crate core;
+extern crate core;
 
 use std::collections::HashMap;
 use std::fs;
@@ -53,10 +54,10 @@ fn main() {
     let last = executor.get_last_time();
 
     for (n, _) in v.iter().enumerate() {
-        let stream_def = StreamDefinition::new(
-            format!("alt_{}", n), page_size, StreamKind::UniStream(Box::new(temp.clone())));
+      //  let stream_def = StreamDefinition::new(
+      //      format!("alt_{}", n), page_size, StreamKind::Aggregate(Box::new(temp.clone())));
 
-        executor.add(stream_def.clone());
+      //  executor.add(stream_def.clone());
     }
 
     for i in (last..last+(60000*100000000)).step_by(60000) {

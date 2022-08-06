@@ -5,9 +5,10 @@ use std::thread;
 use std::time::Duration;
 use crossbeam::channel::Sender;
 use crate::{Blob, Stream, Vessel};
-use crate::data_structures::domain::{Envelope, Graph, Node, StreamDefinition};
+use crate::data_structures::domain::{Envelope, Node, StreamDefinition};
+use crate::data_structures::graph::Graph;
 use crate::domain::UnixTime;
-use crate::streaming::persistent_stream::PersistentStream;
+use crate::streaming::persistent_stream::{create_stream};
 
 pub struct Executor {
     root: String,
@@ -46,7 +47,7 @@ impl Executor {
                             local_dir_path.clone().as_str(), target.clone());
 
                         graph.add(target.clone(), target_stream);
-                        
+
                         for source in target.stream_kind.iter() {
                             graph.subscribe(source.clone(), target.clone());
 
@@ -123,9 +124,9 @@ impl Executor {
             def.page_size as i64);
 
         let last_time = &vessel.get_last_time();
-        let stream = PersistentStream::new(def.clone(), vessel);
+        let stream = create_stream(def, vessel);
 
-        return (Box::new(stream), last_time.clone());
+        return (stream, last_time.clone());
     }
 }
 
