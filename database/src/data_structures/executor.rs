@@ -41,23 +41,26 @@ impl Executor {
                 let msg = receiver.recv().unwrap();
 
                 match msg {
-                    Envelope::Subscribe(source, target) => {
-                        let (stream, last) = Self::create_stream(
+                    Envelope::Add(target) => {
+                        let (target_stream, last) = Self::create_stream(
                             local_dir_path.clone().as_str(), target.clone());
 
-                        graph.add(target.clone(), stream);
-                        graph.subscribe(source.clone(), target.clone());
+                        graph.add(target.clone(), target_stream);
+                        
+                        for source in target.stream_kind.iter() {
+                            graph.subscribe(source.clone(), target.clone());
 
-                        let source =&mut graph.get_stream(source);
-                        let it = source.replay(last);
+                            let source = &mut graph.get_stream(source);
+                            let it = source.replay(last);
 
-                        for (_, batch) in it.enumerate() {
-                            graph.visit(
-                                target.clone(),
-                                Rc::new(batch),
-                                |stream, input| stream.on_next(input));
+                            for (_, batch) in it.enumerate() {
+                                graph.visit(
+                                    target.clone(),
+                                    Rc::new(batch),
+                                    |stream, input| stream.on_next(input));
+                            }
                         }
-                    },
+                    }
                     Envelope::Flush() => {
                         graph.visit_all(Rc::new(vec![]), |stream, v| {
                             stream.flush();
@@ -102,11 +105,15 @@ impl Executor {
     }
 
     pub fn send_data(&self, data: Vec<Blob>) {
-        self.stream.send(Envelope::Data(data)).unwrap();
+        self.stream
+            .send(Envelope::Data(data))
+            .unwrap();
     }
 
-    pub fn subscribe(&self, source: StreamDefinition, target: StreamDefinition) {
-        self.stream.send(Envelope::Subscribe(source, target)).unwrap();
+    pub fn add(&self, source: StreamDefinition) {
+        self.stream
+            .send(Envelope::Add(source))
+            .unwrap();
     }
 
     fn create_stream(root: &str, def: StreamDefinition) -> (Box<dyn Stream>, UnixTime) {
@@ -116,7 +123,6 @@ impl Executor {
             def.page_size as i64);
 
         let last_time = &vessel.get_last_time();
-
         let stream = PersistentStream::new(def.clone(), vessel);
 
         return (Box::new(stream), last_time.clone());

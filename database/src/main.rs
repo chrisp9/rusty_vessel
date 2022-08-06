@@ -17,7 +17,7 @@ use tokio::time;
 use crate::storage::vessel2::Vessel;
 use bincode::{Encode,Decode};
 use chrono::{NaiveDateTime, Utc};
-use crate::data_structures::domain::StreamDefinition;
+use crate::data_structures::domain::{StreamDefinition, StreamKind};
 use crate::data_structures::executor::{Executor};
 use crate::storage::domain::blob::Blob;
 use crate::streaming::domain::{Stream};
@@ -38,9 +38,9 @@ pub struct TemperatureRecord {
 
 fn main() {
     let root = "/home/chris/rusty_vessel";
+    let page_size = 1000*60000;
 
-    let mut i = 0;
-    let mut temp = StreamDefinition::new("Temperature".to_string(), 10000 * 60000);
+    let mut temp = StreamDefinition::new("Temperature".to_string(), page_size, StreamKind::Source());
     let mut executor = Executor::new(temp.clone(), root.to_string(), 10000);
 
     let v = vec![0;100];
@@ -53,10 +53,10 @@ fn main() {
     let last = executor.get_last_time();
 
     for (n, _) in v.iter().enumerate() {
-        i += 1;
         let stream_def = StreamDefinition::new(
-            format!("alt_{}", n), 10000 * 60000);
-        executor.subscribe(temp.clone(), stream_def.clone());
+            format!("alt_{}", n), page_size, StreamKind::UniStream(Box::new(temp.clone())));
+
+        executor.add(stream_def.clone());
     }
 
     for i in (last..last+(60000*100000000)).step_by(60000) {

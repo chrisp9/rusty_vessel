@@ -1,18 +1,38 @@
 use std::collections::HashMap;
+use std::iter;
+use std::option::Iter;
 use std::rc::Rc;
 use crate::{Blob, Stream};
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub enum StreamKind {
+    Source(),
+    UniStream(Box<StreamDefinition>),
+    MultiStream(Vec<StreamDefinition>)
+}
+
+impl StreamKind {
+    pub fn iter(&self) -> Box<dyn Iterator<Item=&StreamDefinition> + '_> {
+        return match self {
+            StreamKind::Source() => Box::new(iter::empty::<&StreamDefinition>()),
+            StreamKind::UniStream(v) => Box::new(iter::once::<&StreamDefinition>(v.as_ref())),
+            StreamKind::MultiStream(v) => Box::new(v.iter())
+        }
+    }
+}
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct StreamDefinition {
     pub name: String,
     pub page_size: usize,
+    pub stream_kind: StreamKind
 }
 
 impl StreamDefinition {
-    pub fn new(name: String, page_size: usize) -> StreamDefinition {
+    pub fn new(name: String, page_size: usize, stream_kind: StreamKind) -> StreamDefinition {
         return StreamDefinition {
             name,
-            page_size
+            page_size,
+            stream_kind
         };
     }
 }
@@ -61,8 +81,8 @@ impl Graph {
         source_node.children.push(target_idx.clone());
     }
 
-    pub fn get_stream(&mut self, key: StreamDefinition) -> &mut Box<dyn Stream>{
-        let idx = self.indexes.get(&key).unwrap();
+    pub fn get_stream(&mut self, key: &StreamDefinition) -> &mut Box<dyn Stream>{
+        let idx = self.indexes.get(key).unwrap();
         let node = &mut self.nodes;
 
         return &mut node[*idx].stream;
@@ -97,7 +117,7 @@ impl Graph {
 }
 
 pub enum Envelope {
-    Subscribe(StreamDefinition, StreamDefinition),
+    Add(StreamDefinition),
     Flush(),
     Data(Vec<Blob>)
 }
