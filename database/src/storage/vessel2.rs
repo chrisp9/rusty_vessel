@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use crate::{ArcRead, threading};
-use crate::domain::UnixTime;
+use crate::{ArcRead, threading, UnixTime};
 use crate::storage::domain::blob::Blob;
 use crate::storage::domain::bucket::Bucket;
 use crate::storage::domain::data_page::DataPage;
@@ -28,12 +27,11 @@ const BUFFER_SIZE: i32 = 1000;
 
 impl Vessel {
     pub fn new(
-        db_root: &str,
-        key: &str,
+        path_buf: PathBuf,
         page_length: i64)
         -> Vessel
     {
-        let path = Path::new(db_root).join(key);
+        let path = path_buf;
 
         let (mut file_system, page) = FileSystem::new(
             path.clone(),

@@ -9,29 +9,14 @@ use crate::domain::UnixTime;
 
 use crate::storage::domain::bucket::Bucket;
 use crate::streaming::domain::{Aggregator, Stream};
+use crate::streaming::streams::aggregate_stream::AggregateStream;
 use crate::streaming::streams::basic_stream::BasicStream;
 
 pub fn create_stream(stream_def: StreamDefinition, vessel: Vessel) -> Box<dyn Stream> {
     return match stream_def.stream_kind {
         StreamKind::Source() => Box::new(BasicStream::new(stream_def, vessel)),
-        StreamKind::Aggregate(_, _) => {}
-        StreamKind::Merge(_) => {}
-    }
-}
-
-
-
-pub struct StaticWindowProcessor {
-    buffer: Aggregator,
-}
-
-impl StaticWindowProcessor {
-    pub fn new(window_size: chrono::Duration) -> StaticWindowProcessor {
-        let bucket = Bucket::epoch(window_size.num_milliseconds());
-        let buffer = Aggregator::new(bucket);
-
-        return StaticWindowProcessor {
-            buffer
-        };
+        StreamKind::Aggregate(_, ref calc, size, interval) => Box::new(
+            AggregateStream::new(stream_def.clone(), calc.clone(), vessel, size, interval)),
+        StreamKind::Merge(_) => Box::new(BasicStream::new(stream_def, vessel))
     }
 }

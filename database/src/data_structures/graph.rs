@@ -38,26 +38,27 @@ impl Graph {
         return &mut node[*idx].stream;
     }
 
-    pub fn visit<F>(&mut self, source: StreamDefinition, data: Rc<Vec<Blob>>, visitor: F)
-        where F : FnMut(&Box<dyn Stream>, Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
+    pub fn visit<F>(&mut self, source: StreamDefinition, data: Rc<Vec<Blob>>, mut visitor: F)
+        where F : FnMut(&mut Box<dyn Stream>, Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
         let idx = self.indexes.get(&source).unwrap();
         self.visit_from(*idx, data, visitor);
     }
 
     pub fn visit_all<F>(&mut self, data: Rc<Vec<Blob>>, visitor: F)
-        where F : FnMut(&Box<dyn Stream>, Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
+        where F : FnMut(&mut Box<dyn Stream>, Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
         self.visit_from(0, data, visitor);
     }
 
-    pub fn visit_from<F>(&mut self, idx: usize, data: Rc<Vec<Blob>>, visitor: F)
-        where F : FnMut(&Box<dyn Stream>, Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
+    pub fn visit_from<F>(&mut self, idx: usize, data: Rc<Vec<Blob>>, mut visitor: F)
+        where F : FnMut(&mut Box<dyn Stream>, Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
 
         let mut results = Vec::new();
         results.push((idx, data));
 
         while let Some((idx, input)) = results.pop() {
-            let node = &self.nodes[idx];
-            let output = visitor(&node.stream, input);
+            let node = &mut self.nodes[idx];
+            let stream = &mut node.stream;
+            let output = visitor(stream, input);
 
             for child in &node.children {
                 results.push((*child, output.clone()))

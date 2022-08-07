@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -18,7 +19,7 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn new(root: StreamDefinition, dir_path: String, buf_size: usize) -> Executor {
+    pub fn new(roots: Vec<StreamDefinition>, dir_path: String, buf_size: usize) -> Executor {
         let (sender, receiver) =
             crossbeam::channel::bounded::<Envelope>(buf_size);
 
@@ -29,13 +30,15 @@ impl Executor {
         let thread = std::thread::spawn(move || {
             let mut graph = Graph::new();
 
-            let (root_stream, last) = Self::create_stream(
-                local_dir_path.clone().as_str(), root.clone());
+            for root in roots {
+                let (root_stream, last) = Self::create_stream(
+                    local_dir_path.clone().as_str(), root.clone());
 
-            graph.add(root, root_stream);
-            {
-                let locked = last_time_ref.lock();
-                locked.unwrap().replace(last);
+                graph.add(root, root_stream);
+                {
+                    let locked = last_time_ref.lock();
+                    locked.unwrap().replace(last);
+                }
             }
 
             loop {
@@ -68,10 +71,10 @@ impl Executor {
                             return v;
                         })
                     },
-                    Envelope::Data(data) => {
+                    Envelope::Data(stream, data) => {
                         let rc_data = Rc::new(data);
 
-                        graph.visit_all(rc_data, |stream, input| {
+                        graph.visit_from(stream, rc_data, |stream, input| {
                             return stream.on_next(input);
                         })
                     }
@@ -105,9 +108,9 @@ impl Executor {
         }
     }
 
-    pub fn send_data(&self, data: Vec<Blob>) {
+    pub fn send_data(&self, source: usize, data: Vec<Blob>) {
         self.stream
-            .send(Envelope::Data(data))
+            .send(Envelope::Data(source, data))
             .unwrap();
     }
 
@@ -118,9 +121,10 @@ impl Executor {
     }
 
     fn create_stream(root: &str, def: StreamDefinition) -> (Box<dyn Stream>, UnixTime) {
+        let path = Path::new(root).join(&def.topic).join(&def.name);
+
         let vessel = Vessel::new(
-            root,
-            def.name.as_str(),
+            path,
             def.page_size as i64);
 
         let last_time = &vessel.get_last_time();
