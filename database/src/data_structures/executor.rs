@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use crossbeam::channel::Sender;
-use crate::{Blob, Stream, Vessel};
+use crate::{Blob, Vessel};
 use crate::data_structures::domain::{Envelope, Node, StreamDefinition};
 use crate::data_structures::graph::Graph;
 use crate::domain::UnixTime;
-use crate::streaming::persistent_stream::{create_stream};
+use crate::streaming::streams::stream::{create_stream, Stream};
 
 pub struct Executor {
     root: String,
@@ -19,27 +19,40 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn new(roots: Vec<StreamDefinition>, dir_path: String, buf_size: usize) -> Executor {
+    pub fn new(roots: Vec<&'static StreamDefinition>, dir_path: String, buf_size: usize) -> Executor {
         let (sender, receiver) =
             crossbeam::channel::bounded::<Envelope>(buf_size);
 
         let local_dir_path = dir_path.clone();
         let last_time = Arc::new(Mutex::new(None));
-        let last_time_ref = last_time.clone();
+        let last_clone = last_time.clone();
 
         let thread = std::thread::spawn(move || {
             let mut graph = Graph::new();
+            let mut last_var = None;
 
             for root in roots {
                 let (root_stream, last) = Self::create_stream(
-                    local_dir_path.clone().as_str(), root.clone());
+                    local_dir_path.clone().as_str(), root);
 
                 graph.add(root, root_stream);
                 {
-                    let locked = last_time_ref.lock();
-                    locked.unwrap().replace(last);
+                    if last_var.is_none() {
+                        last_var = Some(last);
+                    }
+                    else {
+                        if last < last_var.unwrap() {
+                            last_var = Some(last);
+                        }
+                    }
                 }
             }
+
+            {
+                let mut locked = last_time.lock().unwrap();
+                locked.replace(last_var.unwrap());
+            }
+
 
             loop {
                 let msg = receiver.recv().unwrap();
@@ -49,10 +62,10 @@ impl Executor {
                         let (target_stream, last) = Self::create_stream(
                             local_dir_path.clone().as_str(), target.clone());
 
-                        graph.add(target.clone(), target_stream);
+                        graph.add(target, target_stream);
 
                         for source in target.stream_kind.iter() {
-                            graph.subscribe(source.clone(), target.clone());
+                            graph.subscribe(source, target);
 
                             let source = &mut graph.get_stream(source);
                             let it = source.replay(last);
@@ -86,7 +99,7 @@ impl Executor {
             root: dir_path.clone(),
             thread,
             stream: sender.clone(),
-            last_time: last_time.clone(),
+            last_time: last_clone,
         };
 
         thread::spawn(move|| {
@@ -114,13 +127,13 @@ impl Executor {
             .unwrap();
     }
 
-    pub fn add(&self, source: StreamDefinition) {
+    pub fn add(&self, source: &'static StreamDefinition) {
         self.stream
             .send(Envelope::Add(source))
             .unwrap();
     }
 
-    fn create_stream(root: &str, def: StreamDefinition) -> (Box<dyn Stream>, UnixTime) {
+    fn create_stream(root: &str, def: &'static StreamDefinition) -> (Box<dyn Stream>, UnixTime) {
         let path = Path::new(root).join(&def.topic).join(&def.name);
 
         let vessel = Vessel::new(

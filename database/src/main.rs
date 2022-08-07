@@ -22,7 +22,7 @@ use crate::data_structures::domain::{StreamDefinition, StreamKind};
 use crate::data_structures::executor::{Executor};
 use crate::domain::UnixTime;
 use crate::storage::domain::blob::Blob;
-use crate::streaming::domain::{Calc, Stream};
+use crate::streaming::domain::{Calc};
 use crate::threading::ArcRead;
 
 mod threading;
@@ -59,6 +59,17 @@ fn main() {
         root.to_string(),
         10000);
 
+    let mins_5_candles
+        = create_agg_ohlc_topic(roots, "5min".to_string(), 10000);
+
+   // executor.add(mins_5_candles[0]);
+  //  executor.add(mins_5_candles[1]);
+
+    for def in mins_5_candles {
+        executor.add(def);
+        //break;
+    }
+
     let last = executor.get_last_time();
 
     for timestamp in (last..last+(60000*100000000)).step_by(60000) {
@@ -74,37 +85,90 @@ fn main() {
     time::sleep(Duration::from_secs(100000));
 }
 
+fn create_agg_ohlc_topic(candles: Vec<&'static StreamDefinition>, name: String, page_size: usize) ->
+    Vec<&'static StreamDefinition> {
+
+    let open = &candles[0];
+    let high = &candles[1];
+    let low = &candles[2];
+    let close = &candles[3];
+
+    let agg_open = StreamDefinition::new(
+        open.topic.clone(),
+        open.sub_topic.clone(),
+        name.clone(),
+        page_size,
+        StreamKind::Aggregate(
+            open, Calc::First, 5, 60000));
+
+    let agg_high = StreamDefinition::new(
+        high.topic.clone(),
+        high.sub_topic.clone(),
+        name.clone(),
+        page_size,
+        StreamKind::Aggregate(
+            high, Calc::Max, 5, 60000));
+
+    let agg_low = StreamDefinition::new(
+        low.topic.clone(),
+        low.sub_topic.clone(),
+        name.clone(),
+        page_size,
+        StreamKind::Aggregate(
+            low, Calc::Min, 5, 60000));
+
+    let agg_close = StreamDefinition::new(
+        close.topic.clone(),
+        close.sub_topic.clone(),
+        name.clone(),
+        page_size,
+        StreamKind::Aggregate(
+            close, Calc::Last, 5, 60000));
+
+    return vec!(leak(agg_open), leak(agg_high), leak(agg_low), leak(agg_close));
+}
+
 fn create_ohlc_topic(symbol: String, name: String, page_size: usize) -> (
-    StreamDefinition, StreamDefinition, StreamDefinition, StreamDefinition) {
-    let open_stream_btc = StreamDefinition::new(
+    &'static StreamDefinition, &'static StreamDefinition, &'static StreamDefinition, &'static StreamDefinition) {
+
+    let open_stream = StreamDefinition::new(
         symbol.clone(),
-        format!("{name}_open").to_string(),
+        "open".to_string(),
+        name.clone(),
         page_size,
         StreamKind::Source()
     );
 
-    let high_stream_btc = StreamDefinition::new(
+    let high_stream = StreamDefinition::new(
         symbol.clone(),
-        format!("{name}_high").to_string(),
+        "high".to_string(),
+        name.clone(),
         page_size,
         StreamKind::Source()
     );
 
-    let low_stream_btc = StreamDefinition::new(
+    let low_stream = StreamDefinition::new(
         symbol.clone(),
-        format!("{name}_low").to_string(),
+        "low".to_string(),
+        name.clone(),
         page_size,
         StreamKind::Source()
     );
 
-    let close_stream_btc = StreamDefinition::new(
+    let close_stream = StreamDefinition::new(
         symbol,
-        format!("{name}_close").to_string(),
+        "close".to_string(),
+        name.clone(),
         page_size,
         StreamKind::Source()
     );
 
-    return (open_stream_btc, high_stream_btc, low_stream_btc, close_stream_btc);
+    return (leak(open_stream), leak(high_stream), leak(low_stream), leak(close_stream));
+}
+
+pub fn leak<T>(item: T) -> &'static T {
+    let leak = Box::leak(Box::new(item));
+    return leak;
 }
 
 pub fn create_ohlc(timestamp: UnixTime) -> Ohlc {

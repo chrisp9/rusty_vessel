@@ -1,18 +1,19 @@
 use std::rc::Rc;
-use crate::{Blob, Stream, StreamDefinition, Vessel};
+use crate::{Blob, StreamDefinition, Vessel};
 use crate::domain::UnixTime;
 
 use crate::streaming::domain::{Aggregator, Calc};
+use crate::streaming::streams::stream::Stream;
 
 pub struct AggregateStream {
-    pub stream_def: StreamDefinition,
+    pub stream_def: &'static StreamDefinition,
     vessel: Vessel,
-    buf: Aggregator
+    buf: Aggregator,
 }
 
 
 impl AggregateStream {
-    pub fn new(stream_def: StreamDefinition, calc: Calc, vessel: Vessel, count: usize, interval: usize) -> AggregateStream {
+    pub fn new(stream_def: &'static StreamDefinition, calc: Calc, vessel: Vessel, count: usize, interval: usize) -> AggregateStream {
         return AggregateStream {
             stream_def,
             vessel,
@@ -44,3 +45,4 @@ impl Stream for AggregateStream {
         return records.clone();
     }
 }
+

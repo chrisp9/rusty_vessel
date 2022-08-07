@@ -1,14 +1,15 @@
 use std::rc::Rc;
-use crate::{Blob, Stream, StreamDefinition, Vessel};
+use crate::{Blob, StreamDefinition, Vessel};
 use crate::domain::UnixTime;
+use crate::streaming::streams::stream::Stream;
 
 pub struct BasicStream {
-    pub stream_def: StreamDefinition,
+    pub stream_def: &'static StreamDefinition,
     vessel: Vessel
 }
 
 impl BasicStream {
-    pub fn new(stream_def: StreamDefinition, vessel: Vessel) -> BasicStream {
+    pub fn new(stream_def: &'static StreamDefinition, vessel: Vessel) -> BasicStream {
         return BasicStream {
             stream_def,
             vessel
@@ -27,6 +28,6 @@ impl Stream for BasicStream {
 
     fn on_next(&mut self, record: Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
         self.vessel.write(record.clone());
-        return record.clone();
+        return record;
     }
 }

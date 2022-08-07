@@ -52,33 +52,6 @@ impl DataPage {
     }
 
     pub fn write(&mut self, record: Blob) {
-        // let file_guard = self.file.write().unwrap();
-
-        // if self.data.len() == 0 {
-        //     let handle = file_guard;
-        //
-        //     let file = self.open_read(handle.path.clone());
-        //     let mut reader = BufReader::new(file);
-        //
-        //     loop {
-        //         let mut prefix_buf: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
-        //         let read_result = reader.read_exact(&mut prefix_buf);
-        //
-        //         if let Err(e) = read_result {
-        //             break;
-        //         }
-        //
-        //         let len = i64::from_ne_bytes(prefix_buf);
-        //         let mut buf = vec![0u8; len as usize];
-        //         reader.read_exact(&mut buf).unwrap();
-        //
-        //         let (decoded, _): (Blob, usize) = bincode::decode_from_slice(
-        //             &buf[..], config::standard()).unwrap();
-        //
-        //         self.data.push(decoded);
-        //     }
-        // }
-
         self.data.push(record);
     }
 
@@ -107,6 +80,7 @@ impl DataPage {
     pub fn flush(&mut self) {
         let mut guard = self.file.write().unwrap();
         let handle = guard.deref();
+
         let file = self.open_append(&handle.path);
 
         let mut writer = BufWriter::new(&file);

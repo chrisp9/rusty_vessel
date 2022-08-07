@@ -21,6 +21,7 @@ pub struct Vessel {
     file_system: Rc<RefCell<FileSystem>>,
     current_page: Option<DataPage>,
     page_length: i64,
+    last: UnixTime
 }
 
 const BUFFER_SIZE: i32 = 1000;
@@ -38,12 +39,16 @@ impl Vessel {
         page_length);
 
         let data_page = page;
+        let last = *&file_system.get_last_time();
+
+        let fs =  Rc::new(RefCell::new(file_system));
 
         let vessel =  Vessel {
             path,
-            file_system: Rc::new(RefCell::new(file_system)),
+            file_system: fs.clone(),
             current_page: data_page,
-            page_length: page_length as i64
+            page_length: page_length as i64,
+            last
         };
 
         return vessel;
@@ -64,6 +69,12 @@ impl Vessel {
             let record_bucket = Bucket::for_time(
                 record.timestamp,
                 self.page_length);
+
+            if self.last >= record.timestamp {
+                continue;
+            }
+
+            self.last = record.timestamp;
 
             let c = self.file_system.as_ref();
             let mut fs = c.borrow_mut();

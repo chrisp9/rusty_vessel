@@ -4,12 +4,6 @@ use crate::{Blob};
 use crate::domain::UnixTime;
 use crate::storage::domain::bucket::Bucket;
 
-pub trait Stream {
-    fn replay(&mut self, since: UnixTime) -> Box<dyn Iterator<Item=Vec<Blob>>>;
-    fn flush(&mut self);
-    fn on_next(&mut self, batch: Rc<Vec<Blob>>) -> Rc<Vec<Blob>>;
-}
-
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub enum Calc {
     First,
@@ -67,7 +61,7 @@ impl Aggregator {
                     _ => ()
                 }
             }
-            Calc::Last if idx == self.size - 1 => {
+            Calc::Last if idx >= self.max => {
                 entry.item = Some(blob.data);
             }
             _ => ()
