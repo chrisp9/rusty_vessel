@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 use std::option::Iter;
 use std::rc::Rc;
+use uuid::Uuid;
 use crate::{Blob};
 use crate::domain::UnixTime;
 use crate::streaming::domain::Calc;
@@ -27,6 +28,7 @@ impl StreamKind {
 
 #[derive(Eq)]
 pub struct StreamDefinition {
+    pub id: Uuid,
     pub topic: String,
     pub sub_topic: String,
     pub name: String,
@@ -49,6 +51,7 @@ impl PartialEq for StreamDefinition {
 impl StreamDefinition {
     pub fn new(topic: String, sub_topic: String, name: String, page_size: usize, stream_kind: StreamKind) -> StreamDefinition {
         return StreamDefinition {
+            id: Uuid::new_v4(),
             topic,
             sub_topic: sub_topic.clone(),
             name: format!("{sub_topic}_{name}"),

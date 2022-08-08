@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Error;
 use std::fs;
 use std::fs::{DirEntry, File};
-use std::marker::PhantomData;
 use std::ops::Index;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
