@@ -7,22 +7,34 @@ use crate::{Blob};
 use crate::streaming::domain::Calc;
 use crate::streaming::streams::stream::Stream;
 
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub enum MergeKind {
-    Hlc3
+    Hlc3 { high: StreamRef, low: StreamRef, close: StreamRef }
 }
 
 impl MergeKind {
-    pub fn get_func<F>(&mut self) where F:FnMut(HashMap<StreamRef, Blob>) -> F{
+    pub fn get_func(&mut self, streams: HashMap<StreamRef, Blob>) -> Blob {
         return match self {
-            MergeKind::Hlc3 => {
-                |v| self.calc_hlc3(v);
-            }
+            MergeKind::Hlc3 { ref high, ref low, ref close } =>
+                self.calc_hlc3(*high, *low, *close, streams)
+        };
+    }
+
+    pub fn len(&self) -> usize {
+        return match self {
+            MergeKind::Hlc3 { .. } => 3
         }
     }
 
-    pub fn calc_hlc3(&mut self, streams: HashMap<StreamRef, Blob>) {
+    pub fn calc_hlc3(&mut self, high: StreamRef, low: StreamRef, close: StreamRef, streams: HashMap<StreamRef, Blob>) -> Blob{
+        let high_blob = streams.get(&high).unwrap();
+        let low_blob = streams.get(&low).unwrap();
+        let close_blob = streams.get(&close).unwrap();
 
+        let timestamp = close_blob.timestamp;
+        let hlc3 = (high_blob.data + low_blob.data + close_blob.data) / 3.0;
 
+        return Blob::new(timestamp, hlc3);
     }
 }
 
@@ -30,18 +42,8 @@ impl MergeKind {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub enum StreamKind {
     Source(),
-    Aggregate(StreamRef, Calc, usize, usize),
-    Merge(Vec<StreamRef>)
-}
-
-impl StreamKind {
-    pub fn iter(&self) -> Box<dyn Iterator<Item=StreamRef> + '_> {
-        return match self {
-            StreamKind::Source() => Box::new(iter::empty::<StreamRef>()),
-            StreamKind::Aggregate(v, _, _, _) => Box::new(iter::once::<StreamRef>(*v)),
-            StreamKind::Merge(v) => Box::new(v.iter().map(|v| *v)),
-        }
-    }
+    Aggregate(Calc, usize, usize),
+    Merge(MergeKind)
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
@@ -118,7 +120,7 @@ impl Node {
 }
 
 pub enum Envelope {
-    Add(StreamRef),
+    Add(Vec<StreamRef>, StreamRef),
     Flush(),
     Data(StreamRef, Vec<Blob>)
 }

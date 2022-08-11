@@ -18,7 +18,7 @@ use tokio::time;
 use crate::storage::vessel2::Vessel;
 use bincode::{Encode,Decode};
 use chrono::{NaiveDateTime, Utc};
-use crate::data_structures::domain::{StreamDefinition, StreamKind, StreamRef};
+use crate::data_structures::domain::{MergeKind, StreamDefinition, StreamKind, StreamRef};
 use crate::data_structures::executor::{Executor};
 use crate::domain::UnixTime;
 use crate::storage::domain::blob::Blob;
@@ -56,12 +56,12 @@ fn main() {
     let root = "/home/chris/rusty_vessel";
     let page_size = 1000*60000;
 
-    let (open, high, low, close) = create_ohlc_topic(
+    let (o, h, l, c) = create_ohlc_topic(
         "BTC".to_string(),
         "1min".to_string(),
         page_size);
 
-    let roots = vec![open.clone(), high.clone(), low.clone(), close.clone()];
+    let roots = vec![o.clone(), h.clone(), l.clone(), c.clone()];
 
     let mut executor = Executor::new(
         root_def(),
@@ -72,17 +72,18 @@ fn main() {
     let hlc = create_hlc3(
         "BTC".to_string(),
         "1min".to_string(),
-        roots.clone(),
+        h.clone(),
+        l.clone(),
+        c.clone(),
         10000);
 
-    executor.add(hlc);
+    let (o5, h5, l5, c5)
+        = create_agg_ohlc_topic(o,h,l,c, "5min".to_string(), 10000);
 
-    let mins_5_candles
-        = create_agg_ohlc_topic(roots, "5min".to_string(), 10000);
-
-    for def in mins_5_candles {
-        executor.add(def);
-    }
+    executor.add(vec![o], o5);
+    executor.add(vec![h], h5);
+    executor.add(vec![l], l5);
+    executor.add(vec![c], c5);
 
     let last = executor.get_last_time();
 
@@ -90,22 +91,17 @@ fn main() {
 
         let candle = create_ohlc(timestamp);
 
-        executor.send_data(open, vec![Blob::new(timestamp, candle.open)]);
-        executor.send_data(high, vec![Blob::new(timestamp, candle.high)]);
-        executor.send_data(low, vec![Blob::new(timestamp, candle.low)]);
-        executor.send_data(close, vec![Blob::new(timestamp, candle.close)]);
+        executor.send_data(o, vec![Blob::new(timestamp, candle.open)]);
+        executor.send_data(h, vec![Blob::new(timestamp, candle.high)]);
+        executor.send_data(l, vec![Blob::new(timestamp, candle.low)]);
+        executor.send_data(c, vec![Blob::new(timestamp, candle.close)]);
     }
 
     let _ = time::sleep(Duration::from_secs(100000));
 }
 
-fn create_agg_ohlc_topic( candles: Vec<StreamRef>, name: String, page_size: usize) ->
-    Vec<StreamRef> {
-
-    let open = candles[0];
-    let high = candles[1];
-    let low = candles[2];
-    let close = candles[3];
+fn create_agg_ohlc_topic( open: StreamRef, high: StreamRef, low: StreamRef, close: StreamRef, name: String, page_size: usize) ->
+    (StreamRef, StreamRef, StreamRef, StreamRef) {
 
     let agg_open = StreamDefinition::new(
         open.topic.clone(),
@@ -113,7 +109,7 @@ fn create_agg_ohlc_topic( candles: Vec<StreamRef>, name: String, page_size: usiz
         name.clone(),
         page_size,
         StreamKind::Aggregate(
-            open, Calc::First, 5, 60000));
+            Calc::First, 5, 60000));
 
     let agg_high = StreamDefinition::new(
         high.topic.clone(),
@@ -121,7 +117,7 @@ fn create_agg_ohlc_topic( candles: Vec<StreamRef>, name: String, page_size: usiz
         name.clone(),
         page_size,
         StreamKind::Aggregate(
-            high, Calc::Max, 5, 60000));
+            Calc::Max, 5, 60000));
 
     let agg_low = StreamDefinition::new(
         low.topic.clone(),
@@ -129,7 +125,7 @@ fn create_agg_ohlc_topic( candles: Vec<StreamRef>, name: String, page_size: usiz
         name.clone(),
         page_size,
         StreamKind::Aggregate(
-            low, Calc::Min, 5, 60000));
+            Calc::Min, 5, 60000));
 
     let agg_close = StreamDefinition::new(
         close.topic.clone(),
@@ -137,22 +133,31 @@ fn create_agg_ohlc_topic( candles: Vec<StreamRef>, name: String, page_size: usiz
         name.clone(),
         page_size,
         StreamKind::Aggregate(
-            close, Calc::Last, 5, 60000));
+            Calc::Last, 5, 60000));
 
-    return vec!(
+    return (
         StreamRef::new(leak(agg_open)),
         StreamRef::new(leak(agg_high)),
         StreamRef::new(leak(agg_low)),
         StreamRef::new(leak(agg_close)));
 }
 
-fn create_hlc3(symbol: String, name: String, streams: Vec<StreamRef>, page_size: usize) -> StreamRef {
+fn create_hlc3(symbol: String,
+               name: String,
+               high: StreamRef,
+               low: StreamRef,
+               close: StreamRef, page_size: usize) -> StreamRef {
+
     let open_stream = StreamDefinition::new(
         symbol.clone(),
         "hlc3".to_string(),
         name.clone(),
         page_size,
-        StreamKind::Merge(streams)
+        StreamKind::Merge(MergeKind::Hlc3 {
+            high,
+            low,
+            close
+        })
     );
 
     return StreamRef::new(leak(open_stream));

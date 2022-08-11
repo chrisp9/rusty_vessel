@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::{Blob, StreamDefinition, StreamRef, UnixTime, Vessel};
+use crate::{Blob, StreamDefinition, StreamKind, StreamRef, UnixTime, Vessel};
+use crate::data_structures::domain::MergeKind;
 use crate::streaming::streams::stream::Stream;
 
 pub struct StreamBuffer {
@@ -37,30 +38,29 @@ impl StreamBuffer {
 }
 
 
-pub struct MergedStream<F> where F:FnMut(HashMap<StreamRef, Blob>) -> Blob {
+pub struct MergedStream {
     pub stream_def: StreamRef,
     pub sources: StreamBuffer,
-    pub merge_func: F,
+    pub merge_func: MergeKind,
     vessel: Vessel
 }
 
-impl<F> MergedStream<F> where F:FnMut(HashMap<StreamRef, Blob>) -> Blob {
+impl MergedStream {
     pub fn new(
         stream_def: StreamRef,
-        sources: Vec<StreamRef>,
-        merge_func: F,
-        vessel: Vessel) -> MergedStream<F> {
+        kind: MergeKind,
+        vessel: Vessel) -> MergedStream {
 
         return MergedStream {
             stream_def,
-            sources: StreamBuffer::new(sources.len()),
-            merge_func,
+            sources: StreamBuffer::new(kind.len()),
+            merge_func: kind,
             vessel
         }
     }
 }
 
-impl<F> Stream for MergedStream<F> where F:FnMut(HashMap<StreamRef, Blob>) -> Blob {
+impl Stream for MergedStream {
     fn replay(&mut self, since: UnixTime) -> Box<dyn Iterator<Item=Vec<Blob>>> {
         return Box::new(self.vessel.read_from(since));
     }
@@ -70,16 +70,20 @@ impl<F> Stream for MergedStream<F> where F:FnMut(HashMap<StreamRef, Blob>) -> Bl
     }
 
     fn on_next(&mut self, source: StreamRef, record: Rc<Vec<Blob>>) -> Rc<Vec<Blob>> {
+        let mut mapped = vec![];
 
         for item in &*record {
             let merge_result = self.sources.add(source, item.clone());
 
             if let Some(result) = merge_result {
-                (self.merge_func)(result);
+                let record = self.merge_func.get_func(result);
+                mapped.push(record);
             }
         }
 
-        self.vessel.write(record.clone());
-        return record.clone();
+        let mapped = Rc::new(mapped);
+        self.vessel.write(mapped.clone());
+
+        return mapped;
     }
 }

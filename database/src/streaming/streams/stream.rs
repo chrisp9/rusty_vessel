@@ -11,12 +11,17 @@ pub trait Stream {
 }
 
 pub fn create_stream(stream_def: StreamRef, vessel: Vessel) -> Box<dyn Stream> {
-    return match stream_def.clone().stream_kind {
+    let kind = &stream_def.stream_kind;
+
+    return match kind {
         StreamKind::Source() => Box::new(BasicStream::new(stream_def, vessel)),
-        StreamKind::Aggregate(_, ref calc, size, interval) => Box::new(
-            AggregateStream::new(stream_def, calc.clone(), vessel, size, interval)),
-        _  => panic!("")
-        //StreamKind::Merge(v) => Box::new(MergedStream::new(stream_def.clone(), v, (), vessel))
-    }
+
+        StreamKind::Aggregate(calc, size, interval) => Box::new(
+            AggregateStream::new(stream_def, calc.clone(), vessel, *size, *interval)),
+
+        StreamKind::Merge(kind) => {
+            return Box::new(MergedStream::new(stream_def, kind.clone(),  vessel))
+        }
+    };
 }
 

@@ -58,13 +58,13 @@ impl Executor {
                 let msg = receiver.recv().unwrap();
 
                 match msg {
-                    Envelope::Add(target) => {
+                    Envelope::Add(sources, target) => {
                         let (target_stream, last) = Self::create_stream(
                             local_dir_path.clone().as_str(), target.clone());
 
                         graph.add(target, target_stream);
 
-                        for source in target.stream_kind.iter() {
+                        for source in sources {
                             graph.subscribe(source, target);
 
                             let source_stream = &mut graph.get_stream(source);
@@ -129,9 +129,9 @@ impl Executor {
             .unwrap();
     }
 
-    pub fn add(&self, source: StreamRef) {
+    pub fn add(&self, source: Vec<StreamRef>, target: StreamRef) {
         self.stream
-            .send(Envelope::Add(source))
+            .send(Envelope::Add(source, target))
             .unwrap();
     }
 
