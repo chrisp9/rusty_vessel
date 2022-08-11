@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use crossbeam::channel::Sender;
-use crate::{Blob, Vessel};
+use crate::{Blob, StreamRef, Vessel};
 use crate::data_structures::domain::{Envelope, Node, StreamDefinition};
 use crate::data_structures::graph::Graph;
 use crate::domain::UnixTime;
@@ -19,7 +19,7 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn new(roots: Vec<&'static StreamDefinition>, dir_path: String, buf_size: usize) -> Executor {
+    pub fn new(root: StreamRef, roots: Vec<StreamRef>, dir_path: String, buf_size: usize) -> Executor {
         let (sender, receiver) =
             crossbeam::channel::bounded::<Envelope>(buf_size);
 
@@ -28,10 +28,10 @@ impl Executor {
         let last_clone = last_time.clone();
 
         let thread = std::thread::spawn(move || {
-            let mut graph = Graph::new();
+            let mut graph = Graph::new(root);
             let mut last_var = None;
 
-            for root in roots {
+            for root in roots.clone() {
                 let (root_stream, last) = Self::create_stream(
                     local_dir_path.clone().as_str(), root);
 
@@ -67,28 +67,30 @@ impl Executor {
                         for source in target.stream_kind.iter() {
                             graph.subscribe(source, target);
 
-                            let source = &mut graph.get_stream(source);
-                            let it = source.replay(last);
+                            let source_stream = &mut graph.get_stream(source);
+                            let it = source_stream.replay(last);
 
                             for (_, batch) in it.enumerate() {
-                                graph.visit(
-                                    target.clone(),
+                                graph.visit_from(
+                                    target,
                                     Rc::new(batch),
-                                    |stream, input| stream.on_next(input));
+                                    |source, target, input| target.on_next(source, input));
                             }
                         }
                     }
                     Envelope::Flush() => {
-                        graph.visit_all(Rc::new(vec![]), |stream, v| {
-                            stream.flush();
-                            return v;
-                        })
+                        for root in &roots {
+                            graph.visit_from(*root, Rc::new(vec![]), |source, target, input| {
+                                target.flush();
+                                return input;
+                            });
+                        }
                     },
                     Envelope::Data(stream, data) => {
                         let rc_data = Rc::new(data);
 
-                        graph.visit_from(stream, rc_data, |stream, input| {
-                            return stream.on_next(input);
+                        graph.visit_from(stream, rc_data, |source, target,  input| {
+                            return target.on_next(source,input);
                         })
                     }
                 }
@@ -121,19 +123,19 @@ impl Executor {
         }
     }
 
-    pub fn send_data(&self, source: usize, data: Vec<Blob>) {
+    pub fn send_data(&self, source: StreamRef, data: Vec<Blob>) {
         self.stream
             .send(Envelope::Data(source, data))
             .unwrap();
     }
 
-    pub fn add(&self, source: &'static StreamDefinition) {
+    pub fn add(&self, source: StreamRef) {
         self.stream
             .send(Envelope::Add(source))
             .unwrap();
     }
 
-    fn create_stream(root: &str, def: &'static StreamDefinition) -> (Box<dyn Stream>, UnixTime) {
+    fn create_stream(root: &str, def: StreamRef) -> (Box<dyn Stream>, UnixTime) {
         let path = Path::new(root).join(&def.topic).join(&def.name);
 
         let vessel = Vessel::new(

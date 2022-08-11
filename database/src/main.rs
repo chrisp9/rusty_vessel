@@ -18,7 +18,7 @@ use tokio::time;
 use crate::storage::vessel2::Vessel;
 use bincode::{Encode,Decode};
 use chrono::{NaiveDateTime, Utc};
-use crate::data_structures::domain::{StreamDefinition, StreamKind};
+use crate::data_structures::domain::{StreamDefinition, StreamKind, StreamRef};
 use crate::data_structures::executor::{Executor};
 use crate::domain::UnixTime;
 use crate::storage::domain::blob::Blob;
@@ -41,6 +41,15 @@ pub struct Ohlc {
     pub close: f64
 }
 
+fn root_def() -> StreamRef {
+    return StreamRef::new(leak(StreamDefinition::new(
+        "root".to_string(),
+        "root".to_string(),
+        "root".to_string(),
+        0,
+        StreamKind::Source()
+    )));
+}
 
 
 fn main() {
@@ -55,19 +64,24 @@ fn main() {
     let roots = vec![open.clone(), high.clone(), low.clone(), close.clone()];
 
     let mut executor = Executor::new(
+        root_def(),
         roots.clone(),
         root.to_string(),
         10000);
 
+    let hlc = create_hlc3(
+        "BTC".to_string(),
+        "1min".to_string(),
+        roots.clone(),
+        10000);
+
+    executor.add(hlc);
+
     let mins_5_candles
         = create_agg_ohlc_topic(roots, "5min".to_string(), 10000);
 
-   // executor.add(mins_5_candles[0]);
-  //  executor.add(mins_5_candles[1]);
-
     for def in mins_5_candles {
         executor.add(def);
-        //break;
     }
 
     let last = executor.get_last_time();
@@ -76,22 +90,22 @@ fn main() {
 
         let candle = create_ohlc(timestamp);
 
-        executor.send_data(0, vec![Blob::new(timestamp, candle.open)]);
-        executor.send_data(1, vec![Blob::new(timestamp, candle.high)]);
-        executor.send_data(2, vec![Blob::new(timestamp, candle.low)]);
-        executor.send_data(3, vec![Blob::new(timestamp, candle.close)]);
+        executor.send_data(open, vec![Blob::new(timestamp, candle.open)]);
+        executor.send_data(high, vec![Blob::new(timestamp, candle.high)]);
+        executor.send_data(low, vec![Blob::new(timestamp, candle.low)]);
+        executor.send_data(close, vec![Blob::new(timestamp, candle.close)]);
     }
 
-    time::sleep(Duration::from_secs(100000));
+    let _ = time::sleep(Duration::from_secs(100000));
 }
 
-fn create_agg_ohlc_topic(candles: Vec<&'static StreamDefinition>, name: String, page_size: usize) ->
-    Vec<&'static StreamDefinition> {
+fn create_agg_ohlc_topic( candles: Vec<StreamRef>, name: String, page_size: usize) ->
+    Vec<StreamRef> {
 
-    let open = &candles[0];
-    let high = &candles[1];
-    let low = &candles[2];
-    let close = &candles[3];
+    let open = candles[0];
+    let high = candles[1];
+    let low = candles[2];
+    let close = candles[3];
 
     let agg_open = StreamDefinition::new(
         open.topic.clone(),
@@ -125,11 +139,27 @@ fn create_agg_ohlc_topic(candles: Vec<&'static StreamDefinition>, name: String, 
         StreamKind::Aggregate(
             close, Calc::Last, 5, 60000));
 
-    return vec!(leak(agg_open), leak(agg_high), leak(agg_low), leak(agg_close));
+    return vec!(
+        StreamRef::new(leak(agg_open)),
+        StreamRef::new(leak(agg_high)),
+        StreamRef::new(leak(agg_low)),
+        StreamRef::new(leak(agg_close)));
+}
+
+fn create_hlc3(symbol: String, name: String, streams: Vec<StreamRef>, page_size: usize) -> StreamRef {
+    let open_stream = StreamDefinition::new(
+        symbol.clone(),
+        "hlc3".to_string(),
+        name.clone(),
+        page_size,
+        StreamKind::Merge(streams)
+    );
+
+    return StreamRef::new(leak(open_stream));
 }
 
 fn create_ohlc_topic(symbol: String, name: String, page_size: usize) -> (
-    &'static StreamDefinition, &'static StreamDefinition, &'static StreamDefinition, &'static StreamDefinition) {
+    StreamRef, StreamRef, StreamRef, StreamRef) {
 
     let open_stream = StreamDefinition::new(
         symbol.clone(),
@@ -163,7 +193,11 @@ fn create_ohlc_topic(symbol: String, name: String, page_size: usize) -> (
         StreamKind::Source()
     );
 
-    return (leak(open_stream), leak(high_stream), leak(low_stream), leak(close_stream));
+    return (
+        StreamRef::new(leak(open_stream)),
+        StreamRef::new(leak(high_stream)),
+        StreamRef::new(leak(low_stream)),
+        StreamRef::new(leak(close_stream)));
 }
 
 pub fn leak<T>(item: T) -> &'static T {

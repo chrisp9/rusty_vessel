@@ -1,30 +1,70 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::iter;
-use std::option::Iter;
-use std::rc::Rc;
+use std::ops::Deref;
 use uuid::Uuid;
 use crate::{Blob};
-use crate::domain::UnixTime;
 use crate::streaming::domain::Calc;
 use crate::streaming::streams::stream::Stream;
+
+pub enum MergeKind {
+    Hlc3
+}
+
+impl MergeKind {
+    pub fn get_func<F>(&mut self) where F:FnMut(HashMap<StreamRef, Blob>) -> F{
+        return match self {
+            MergeKind::Hlc3 => {
+                |v| self.calc_hlc3(v);
+            }
+        }
+    }
+
+    pub fn calc_hlc3(&mut self, streams: HashMap<StreamRef, Blob>) {
+
+
+    }
+}
+
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub enum StreamKind {
     Source(),
-    Aggregate(&'static StreamDefinition, Calc, usize, usize),
-    Merge(Vec<&'static StreamDefinition>)
+    Aggregate(StreamRef, Calc, usize, usize),
+    Merge(Vec<StreamRef>)
 }
 
 impl StreamKind {
-    pub fn iter(&self) -> Box<dyn Iterator<Item=&'static StreamDefinition> + '_> {
+    pub fn iter(&self) -> Box<dyn Iterator<Item=StreamRef> + '_> {
         return match self {
-            StreamKind::Source() => Box::new(iter::empty::<&StreamDefinition>()),
-            StreamKind::Aggregate(v, _, _, _) => Box::new(iter::once::<&StreamDefinition>(v)),
+            StreamKind::Source() => Box::new(iter::empty::<StreamRef>()),
+            StreamKind::Aggregate(v, _, _, _) => Box::new(iter::once::<StreamRef>(*v)),
             StreamKind::Merge(v) => Box::new(v.iter().map(|v| *v)),
         }
     }
 }
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+pub struct StreamRef {
+    refr:  &'static StreamDefinition
+}
+
+impl StreamRef {
+    pub fn new(defn: &'static StreamDefinition) -> StreamRef {
+        return StreamRef {
+            refr: defn
+        };
+    }
+}
+
+impl Deref for StreamRef {
+    type Target = StreamDefinition;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.refr;
+    }
+}
+
 
 #[derive(Eq)]
 pub struct StreamDefinition {
@@ -62,13 +102,13 @@ impl StreamDefinition {
 }
 
 pub struct Node {
-    pub defn: &'static StreamDefinition,
+    pub defn: StreamRef,
     pub stream: Box<dyn Stream>,
-    pub children: Vec<usize>
+    pub children: Vec<StreamRef>
 }
 
 impl Node {
-    pub fn new(defn: &'static StreamDefinition, stream: Box<dyn Stream>) -> Node {
+    pub fn new(defn: StreamRef, stream: Box<dyn Stream>) -> Node {
         return Node {
             defn,
             stream,
@@ -78,7 +118,7 @@ impl Node {
 }
 
 pub enum Envelope {
-    Add(&'static StreamDefinition),
+    Add(StreamRef),
     Flush(),
-    Data(usize, Vec<Blob>)
+    Data(StreamRef, Vec<Blob>)
 }
