@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use crate::{Blob, StreamDefinition, StreamKind, StreamRef, UnixTime, Vessel};
-use crate::data_structures::domain::MergeKind;
+use crate::data_structures::domain::MergedStreamRef;
 use crate::streaming::streams::stream::Stream;
 
 pub struct StreamBuffer {
@@ -25,7 +25,7 @@ impl StreamBuffer {
             .or_insert(HashMap::new());
 
         streams_for_tick
-            .insert(stream, data).unwrap();
+            .insert(stream, data);
 
         if streams_for_tick.len() >= self.count {
             let result = streams_for_tick.clone();
@@ -41,14 +41,14 @@ impl StreamBuffer {
 pub struct MergedStream {
     pub stream_def: StreamRef,
     pub sources: StreamBuffer,
-    pub merge_func: MergeKind,
+    pub merge_func: MergedStreamRef,
     vessel: Vessel
 }
 
 impl MergedStream {
     pub fn new(
         stream_def: StreamRef,
-        kind: MergeKind,
+        kind: MergedStreamRef,
         vessel: Vessel) -> MergedStream {
 
         return MergedStream {

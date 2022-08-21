@@ -8,25 +8,30 @@ use crate::streaming::domain::Calc;
 use crate::streaming::streams::stream::Stream;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub enum MergeKind {
-    Hlc3 { high: StreamRef, low: StreamRef, close: StreamRef }
+pub enum MergedStreamRef {
+    Hlc3   { high: StreamRef, low: StreamRef, close: StreamRef },
+    // Vwap   { volume: StreamRef, close: StreamRef, periods: usize },
+    // StdDev { source: StreamRef},
+    // Ema    { source: StreamRef, periods: usize},
+    // Rsi    { source: StreamRef, periods: usize},
 }
 
-impl MergeKind {
+impl MergedStreamRef {
     pub fn get_func(&mut self, streams: HashMap<StreamRef, Blob>) -> Blob {
         return match self {
-            MergeKind::Hlc3 { ref high, ref low, ref close } =>
-                self.calc_hlc3(*high, *low, *close, streams)
+            MergedStreamRef::Hlc3 { ref high, ref low, ref close } =>
+                self.calc_hlc3(*high, *low, *close, streams),
+
         };
     }
 
-    pub fn len(&self) -> usize {
-        return match self {
-            MergeKind::Hlc3 { .. } => 3
-        }
-    }
+    pub fn calc_hlc3(
+        &mut self,
+        high: StreamRef,
+        low: StreamRef,
+        close: StreamRef,
+        streams: HashMap<StreamRef, Blob>) -> Blob {
 
-    pub fn calc_hlc3(&mut self, high: StreamRef, low: StreamRef, close: StreamRef, streams: HashMap<StreamRef, Blob>) -> Blob{
         let high_blob = streams.get(&high).unwrap();
         let low_blob = streams.get(&low).unwrap();
         let close_blob = streams.get(&close).unwrap();
@@ -36,6 +41,12 @@ impl MergeKind {
 
         return Blob::new(timestamp, hlc3);
     }
+
+    pub fn len(&self) -> usize {
+        return match self {
+            MergedStreamRef::Hlc3 { .. } => 3
+        }
+    }
 }
 
 
@@ -43,7 +54,7 @@ impl MergeKind {
 pub enum StreamKind {
     Source(),
     Aggregate(Calc, usize, usize),
-    Merge(MergeKind)
+    Merge(MergedStreamRef)
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
@@ -70,33 +81,27 @@ impl Deref for StreamRef {
 
 #[derive(Eq)]
 pub struct StreamDefinition {
-    pub id: Uuid,
-    pub topic: String,
-    pub sub_topic: String,
-    pub name: String,
+    pub path: String,
     pub page_size: usize,
     pub stream_kind: StreamKind
 }
 
 impl Hash for StreamDefinition {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write(self.name.as_bytes())
+        state.write(self.path.as_bytes())
     }
 }
 
 impl PartialEq for StreamDefinition {
     fn eq(&self, other: &Self) -> bool {
-        return self.topic == other.topic && self.name == other.name;
+        return self.path == other.path;
     }
 }
 
 impl StreamDefinition {
-    pub fn new(topic: String, sub_topic: String, name: String, page_size: usize, stream_kind: StreamKind) -> StreamDefinition {
+    pub fn new(path: String, page_size: usize, stream_kind: StreamKind) -> StreamDefinition {
         return StreamDefinition {
-            id: Uuid::new_v4(),
-            topic,
-            sub_topic: sub_topic.clone(),
-            name: format!("{sub_topic}_{name}"),
+            path,
             page_size,
             stream_kind
         };
@@ -124,3 +129,4 @@ pub enum Envelope {
     Flush(),
     Data(StreamRef, Vec<Blob>)
 }
+

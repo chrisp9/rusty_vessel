@@ -56,7 +56,7 @@ impl Graph {
             let output = visitor(source_stream, output_stream, input_data);
 
             for child in &node.children {
-                buf.push((source_stream, *child, output.clone()))
+                buf.push((target_stream, *child, output.clone()))
             }
         }
 
