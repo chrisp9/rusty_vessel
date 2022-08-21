@@ -73,7 +73,7 @@ impl LexState {
             LexState::None => {
                 match glyph {
                     Glyph::Dollar     => Ok(self.new_unary(UnaryExprKind::Variable)),
-                    Glyph::ArrayStart => {}
+                    Glyph::ArrayStart => error(glyph),
                     Glyph::Equals     => error(glyph),
                     Glyph::ArrayEnd   => error(glyph),
                     Glyph::Comma      => error(glyph),
@@ -82,17 +82,15 @@ impl LexState {
                     Glyph::SlashBang  => error(glyph),
                     Glyph::Ampersand  => error(glyph),
                     Glyph::SemiColon  => error(glyph),
-                    Glyph::Word(_)    => error(glyph),
+                    Glyph::Word(w)    => Ok(self)
                 }
             },
+
             LexState::Last { .. } => {}
             LexState::UnaryState { .. } => {}
             LexState::BinaryState { .. } => {}
             LexState::KaryState => {}
         }
-
-        return;
-
     }
 
     pub fn new_unary(self, kind: UnaryExprKind) -> StateTransition {
@@ -112,8 +110,6 @@ impl StateMachine {
     }
 
     pub fn transition(current: Glyph) {
-
-
         match current {
 
         }
@@ -143,7 +139,7 @@ impl Lexer {
 
         for token in tokens {
             match token {
-                Glyph::SemiColon(_) => {
+                Glyph::SemiColon => {
                     if current.len() > 0 {
                         result.push(current);
                         current = vec![];
@@ -174,7 +170,7 @@ pub enum Expr {
 }
 
 
-#[derive(Debug, Form)]
+#[derive(Debug)]
 pub enum Glyph {
     Dollar,
     Equals,
@@ -202,7 +198,7 @@ impl Display for Glyph {
             SlashBang => write!(f, "/!"),
             Ampersand => write!(f, "&"),
             SemiColon => write!(f, ";"),
-            Word(w) => write!(f, word)
+            Glyph::Word(w) => write!(f, "{w}")
         }
     }
 }
@@ -243,20 +239,20 @@ impl Tokenizer {
             let next = self.peek_at(index + 1);
 
             let glyphs = match chr.clone() {
-                g @ '$' => self.next_glyph(|| Some(Glyph::Dollar(g))),
-                g @ '=' => self.next_glyph(|| Some(Glyph::Equals(g))),
-                g @ '[' => self.next_glyph(|| Some(Glyph::ArrayStart(g))),
-                g @ ']' => self.next_glyph(|| Some(Glyph::ArrayEnd(g))),
-                g @ ',' => self.next_glyph(|| Some(Glyph::Comma(g))),
-                g @ '&' => self.next_glyph(|| Some(Glyph::Ampersand(g))),
-                g @ ';' => self.next_glyph(|| Some(Glyph::SemiColon(g))),
+                '$' => self.next_glyph(|| Some(Glyph::Dollar)),
+                '=' => self.next_glyph(|| Some(Glyph::Equals)),
+                '[' => self.next_glyph(|| Some(Glyph::ArrayStart)),
+                ']' => self.next_glyph(|| Some(Glyph::ArrayEnd)),
+                ',' => self.next_glyph(|| Some(Glyph::Comma)),
+                '&' => self.next_glyph(|| Some(Glyph::Ampersand)),
+                ';' => self.next_glyph(|| Some(Glyph::SemiColon)),
 
                 // Slashes are special - they can be used as a single
                 // character '/' glyph, or a multi-character glyph
                 // using '/?' or '/!'.
-                '/' if next == '?' => self.next_glyph(|| Some(SlashQuest("/?".to_string()))),
-                '/' if next == '!' => self.next_glyph(|| Some(SlashBang("/!".to_string()))),
-                g @ '/' => self.next_glyph(|| Some(Slash(g))),
+                '/' if next == '?' => self.next_glyph(|| Some(Glyph::SlashQuest)),
+                '/' if next == '!' => self.next_glyph(|| Some(Glyph::SlashBang)),
+                g @ '/' => self.next_glyph(|| Some(Glyph::Slash)),
 
                 // Space and newline isn't lexed, but we still use these
                 // to signal that a prior word has ended.
@@ -298,7 +294,7 @@ impl Tokenizer {
         let next = func();
         if let Some(v) = next {
             match v {
-                Glyph::Slash(_) => (),
+                Glyph::Slash => (),
                 v => vocabs.push(v)
             }
         }
